@@ -41,6 +41,7 @@ import {
 } from './cinema/layout'
 
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const IS_NARROW = () => matchMedia('(max-width: 1100px)').matches
 const SEL = new Color(0xe8a838)
 const HOV = new Color(0xf0c56a)
 const GROUP = new Color(0xf0c56a)
@@ -135,6 +136,75 @@ export function startApp(root: HTMLElement): void {
   let currentInfo: SeatInfo | null = null
   let panelRevealed = false
   let houseLevel = { v: 1 }
+  let orbitDragging = false
+
+  // Touch needs higher gain (shorter swipes) and 1:1 tracking — mouse damping feels laggy on phones
+  const coarsePointer = () =>
+    matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 1100px)').matches
+  const orbitSens = () =>
+    coarsePointer() ? { x: 0.01, y: 0.0072 } : { x: 0.005, y: 0.0035 }
+  const seatSens = () =>
+    coarsePointer() ? { x: 0.0062, y: 0.0044 } : { x: 0.003, y: 0.0022 }
+  const tapSlop = () => (coarsePointer() ? 16 : 7)
+
+  function setSheetCollapsed(collapsed: boolean) {
+    ui.rightcol.classList.toggle('collapsed', collapsed)
+    ui.sheetPeek.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
+    syncPeekLabel()
+  }
+
+  function syncPeekLabel() {
+    const label = ui.sheetPeek.querySelector('.peek-label')
+    if (!label) return
+    const collapsed = ui.rightcol.classList.contains('collapsed')
+    if (!collapsed) {
+      label.textContent = 'Seat details'
+      return
+    }
+    if (currentInfo) {
+      label.textContent = `Row ${currentInfo.rowLetter} · Seat ${currentInfo.seat} · €${currentInfo.price}`
+    } else {
+      label.textContent = 'Show seat details'
+    }
+  }
+
+  function expandShowcard(expanded: boolean) {
+    const showcard = document.getElementById('showcard')
+    showcard?.classList.toggle('expanded', expanded)
+    ui.showToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    const toggleLabel = ui.showToggle.querySelector('.show-toggle-label')
+    if (toggleLabel) {
+      toggleLabel.textContent = expanded ? 'Hide halls' : 'Halls & formats'
+    }
+  }
+
+  function revealSheetForSeat() {
+    if (IS_NARROW()) setSheetCollapsed(false)
+  }
+
+  function markSheetHasSeat(has: boolean) {
+    ui.rightcol.classList.toggle('has-seat', has)
+    syncPeekLabel()
+  }
+
+  function syncMobileChrome() {
+    const narrow = IS_NARROW()
+    const ovTitle = document.getElementById('ov-title')
+    if (ovTitle) {
+      ovTitle.textContent = narrow
+        ? 'Seat map · tap to select'
+        : 'Seat map · click to select · Shift+click for a group'
+    }
+    ui.camFooter.textContent = narrow
+      ? 'Tap a seat in 3D · ★ for best available'
+      : 'Drag to orbit · Scroll to zoom · Click a seat'
+    ui.orbitHint.textContent = narrow
+      ? 'Tap a seat · drag to orbit · pinch to zoom'
+      : 'Click a seat · [ ] to browse · Shift+click for a group'
+    ui.sbHint.textContent = narrow
+      ? 'Drag to look around · pinch to zoom'
+      : 'Look around · scroll to zoom the screen'
+  }
 
   const seatView = {
     eye: new Vector3(),
@@ -167,6 +237,19 @@ export function startApp(root: HTMLElement): void {
     requestAnimationFrame(tick)
   }
 
+  function applySeatLook() {
+    const yaw = seatView.yawBase + seatView.yawOff
+    const pitch = seatView.pitchBase + seatView.pitchOff
+    seatLookDir.set(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch),
+    )
+    camera.position.copy(seatView.eye)
+    seatLookAt.copy(seatView.eye).add(seatLookDir)
+    camera.lookAt(seatLookAt)
+  }
+
   const clock0 = performance.now()
   function tick() {
     looping = false
@@ -187,7 +270,9 @@ export function startApp(root: HTMLElement): void {
       const dy = Math.abs(orbit.phiT - orbit.phi)
       const dr = Math.abs(orbit.radiusT - orbit.radius)
       if (dx > ORBIT_EPS || dy > ORBIT_EPS || dr > ORBIT_EPS) {
-        dampOrbit(orbit, 0.14)
+        // While finger-dragging on touch we already snap in pointermove — keep damp for mouse / inertia
+        const damp = orbitDragging && coarsePointer() ? 1 : 0.14
+        dampOrbit(orbit, damp)
         applyOrbit(camera, orbit)
         dirty = true
         keepGoing = true
@@ -213,16 +298,8 @@ export function startApp(root: HTMLElement): void {
         }
       }
     } else if (mode === 'seat') {
-      const yaw = seatView.yawBase + seatView.yawOff
-      const pitch = seatView.pitchBase + seatView.pitchOff
-      seatLookDir.set(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        Math.cos(yaw) * Math.cos(pitch),
-      )
-      camera.position.copy(seatView.eye)
-      seatLookAt.copy(seatView.eye).add(seatLookDir)
-      camera.lookAt(seatLookAt)
+      applySeatLook()
+      if (orbitDragging) dirty = true
     }
 
     if (dirty) {
@@ -316,6 +393,8 @@ export function startApp(root: HTMLElement): void {
     syncFavButton()
     if (panelRevealed) {
       updateSeatPanel(ui, info, confirmed ? 'confirmed' : 'browsing', groupStats())
+      markSheetHasSeat(true)
+      revealSheetForSeat()
     }
     writeDeepLink(info)
     if (opts?.fly) flyToSeat(i)
@@ -409,12 +488,16 @@ export function startApp(root: HTMLElement): void {
     ui.dock.classList.add('hidden')
     ui.backbar.classList.add('show')
     ui.sbHint.classList.add('show')
+    document.getElementById('showcard')?.classList.add('seat-hidden')
+    expandShowcard(false)
     setTimeout(() => ui.sbHint.classList.remove('show'), 4000)
     audio.setLevel(0.02)
     audio.setHum(0.018)
     dimHouse(0.22, 1.1)
     panelRevealed = true
     updateSeatPanel(ui, info, 'previewing', groupStats())
+    markSheetHasSeat(true)
+    revealSheetForSeat()
     captureView(info.i)
     invalidate()
   }
@@ -436,6 +519,8 @@ export function startApp(root: HTMLElement): void {
     refreshMap()
     syncFavButton()
     writeDeepLink(info)
+    markSheetHasSeat(true)
+    revealSheetForSeat()
     ui.pImg.classList.remove('ready')
     ui.pPh.style.display = 'grid'
     if (mode === 'orbit') {
@@ -481,6 +566,7 @@ export function startApp(root: HTMLElement): void {
     ui.backbar.classList.remove('show')
     ui.sbHint.classList.remove('show')
     ui.dock.classList.remove('hidden')
+    document.getElementById('showcard')?.classList.remove('seat-hidden')
     seats.setLabelsVisible(true)
     dimHouse(1, 1.0)
     audio.setHum(0)
@@ -633,67 +719,92 @@ export function startApp(root: HTMLElement): void {
   let pinchDist = 0
   let pendingHover: { x: number; y: number } | null = null
 
-  ui.canvas.addEventListener('pointerdown', (e) => {
-    ui.canvas.setPointerCapture(e.pointerId)
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    dragStart = { x: e.clientX, y: e.clientY, t: performance.now(), shift: e.shiftKey }
-    dragMoved = 0
-    if (pointers.size === 2) {
-      const p = [...pointers.values()]
-      pinchDist = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
-    }
-    ui.canvas.classList.add('dragging')
-    audio.ensure()
-  })
-
-  ui.canvas.addEventListener('pointermove', (e) => {
-    if (!pointers.has(e.pointerId)) {
-      if (mode === 'orbit') {
-        pendingHover = { x: e.clientX, y: e.clientY }
-        schedule()
+  ui.canvas.addEventListener(
+    'pointerdown',
+    (e) => {
+      e.preventDefault()
+      ui.canvas.setPointerCapture(e.pointerId)
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      dragStart = { x: e.clientX, y: e.clientY, t: performance.now(), shift: e.shiftKey }
+      dragMoved = 0
+      orbitDragging = mode === 'orbit' || mode === 'seat'
+      if (pointers.size === 2) {
+        const p = [...pointers.values()]
+        pinchDist = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
       }
-      return
-    }
-    const prev = pointers.get(e.pointerId)!
-    const dx = e.clientX - prev.x
-    const dy = e.clientY - prev.y
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    dragMoved += Math.abs(dx) + Math.abs(dy)
-    if (pointers.size === 2) {
-      const p = [...pointers.values()]
-      const d = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
-      if (pinchDist > 0 && mode === 'orbit') {
-        orbit.radiusT = MathUtils.clamp(
-          orbit.radiusT * (pinchDist / d),
-          orbitRadiusMin,
-          orbitRadiusMax,
-        )
+      ui.canvas.classList.add('dragging')
+      audio.ensure()
+    },
+    { passive: false },
+  )
+
+  ui.canvas.addEventListener(
+    'pointermove',
+    (e) => {
+      if (!pointers.has(e.pointerId)) {
+        if (mode === 'orbit') {
+          pendingHover = { x: e.clientX, y: e.clientY }
+          schedule()
+        }
+        return
+      }
+      e.preventDefault()
+      const prev = pointers.get(e.pointerId)!
+      const dx = e.clientX - prev.x
+      const dy = e.clientY - prev.y
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      dragMoved += Math.abs(dx) + Math.abs(dy)
+      if (pointers.size === 2) {
+        const p = [...pointers.values()]
+        const d = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
+        if (pinchDist > 0 && mode === 'orbit') {
+          orbit.radiusT = MathUtils.clamp(
+            orbit.radiusT * (pinchDist / d),
+            orbitRadiusMin,
+            orbitRadiusMax,
+          )
+          if (coarsePointer()) {
+            orbit.radius = orbit.radiusT
+            applyOrbit(camera, orbit)
+          }
+          invalidate()
+        }
+        pinchDist = d
+        return
+      }
+      if (mode === 'orbit') {
+        const sens = orbitSens()
+        orbit.thetaT -= dx * sens.x
+        orbit.phiT = MathUtils.clamp(orbit.phiT - dy * sens.y, 0.25, 1.35)
+        // Finger tracking: skip damp lag while dragging on touch
+        if (coarsePointer()) {
+          orbit.theta = orbit.thetaT
+          orbit.phi = orbit.phiT
+          applyOrbit(camera, orbit)
+        }
+        hideTip()
+        invalidate()
+      } else if (mode === 'seat') {
+        const sens = seatSens()
+        seatView.yawOff = MathUtils.clamp(seatView.yawOff - dx * sens.x, -1.1, 1.1)
+        seatView.pitchOff = MathUtils.clamp(seatView.pitchOff + dy * sens.y, -0.4, 0.45)
+        if (coarsePointer()) applySeatLook()
         invalidate()
       }
-      pinchDist = d
-      return
-    }
-    if (mode === 'orbit') {
-      orbit.thetaT -= dx * 0.005
-      orbit.phiT = MathUtils.clamp(orbit.phiT - dy * 0.0035, 0.25, 1.35)
-      hideTip()
-      invalidate()
-    } else if (mode === 'seat') {
-      seatView.yawOff = MathUtils.clamp(seatView.yawOff - dx * 0.003, -1.1, 1.1)
-      seatView.pitchOff = MathUtils.clamp(seatView.pitchOff + dy * 0.0022, -0.4, 0.45)
-      invalidate()
-    }
-  })
+    },
+    { passive: false },
+  )
 
   function endPointer(e: PointerEvent) {
     ui.canvas.classList.remove('dragging')
     if (!pointers.has(e.pointerId)) return
     pointers.delete(e.pointerId)
     pinchDist = 0
+    if (pointers.size === 0) orbitDragging = false
     if (
       dragStart &&
       mode === 'orbit' &&
-      dragMoved < 7 &&
+      dragMoved < tapSlop() &&
       performance.now() - dragStart.t < 520
     ) {
       const idx = seats.picker.pickAt(e.clientX, e.clientY, ui.canvas)
@@ -897,9 +1008,12 @@ export function startApp(root: HTMLElement): void {
   })
 
   ui.sheetPeek.addEventListener('click', () => {
-    const collapsed = ui.rightcol.classList.toggle('collapsed')
-    ui.sheetPeek.setAttribute('aria-expanded', collapsed ? 'false' : 'true')
-    ui.sheetPeek.textContent = collapsed ? 'Show seat details' : 'Seat details'
+    setSheetCollapsed(!ui.rightcol.classList.contains('collapsed'))
+  })
+
+  ui.showToggle.addEventListener('click', () => {
+    const open = !document.getElementById('showcard')?.classList.contains('expanded')
+    expandShowcard(open)
   })
 
   function onResize() {
@@ -911,6 +1025,7 @@ export function startApp(root: HTMLElement): void {
       Math.max(1, Math.floor(innerWidth * 0.5)),
       Math.max(1, Math.floor(innerHeight * 0.5)),
     )
+    syncMobileChrome()
     invalidate()
   }
   addEventListener('resize', onResize)
@@ -929,6 +1044,13 @@ export function startApp(root: HTMLElement): void {
   refreshMap()
   syncFavButton()
   applyLayoutMeta()
+  syncMobileChrome()
+  if (IS_NARROW()) {
+    setSheetCollapsed(true)
+    expandShowcard(false)
+  } else {
+    setSheetCollapsed(false)
+  }
 
   function mountHallPicker() {
     renderHallPicker(
@@ -961,6 +1083,7 @@ export function startApp(root: HTMLElement): void {
       ui.backbar.classList.remove('show')
       ui.sbHint.classList.remove('show')
       ui.dock.classList.remove('hidden')
+      document.getElementById('showcard')?.classList.remove('seat-hidden')
       seats.setLabelsVisible(true)
       audio.setHum(0)
       dimHouse(1, 0.35)
@@ -1026,6 +1149,7 @@ export function startApp(root: HTMLElement): void {
     syncFavButton()
     updateSeatPanel(ui, null, 'empty')
     panelRevealed = true
+    markSheetHasSeat(false)
     lastMmX = Number.NaN
     invalidate()
   }
@@ -1071,15 +1195,11 @@ export function startApp(root: HTMLElement): void {
     screen.setAnimating(false)
     panelRevealed = true
     updateSeatPanel(ui, null, 'empty')
+    markSheetHasSeat(false)
     invalidate()
     ui.orbitHint.classList.add('show')
     setTimeout(() => ui.orbitHint.classList.remove('show'), 5200)
   }
 
   void playIntro()
-
-  // Mobile cam footer hint
-  if (matchMedia('(max-width: 1100px)').matches) {
-    ui.camFooter.textContent = 'Tap a seat in 3D · ★ for best available'
-  }
 }

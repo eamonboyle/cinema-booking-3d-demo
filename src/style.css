@@ -55,6 +55,9 @@ a:focus-visible {
   inset: 0;
   display: block;
   cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 #c.dragging {
   cursor: grabbing;
@@ -232,6 +235,9 @@ nav > * {
   left: 22px;
   width: 268px;
   padding: 18px 18px 16px;
+}
+#showcard .show-toggle {
+  display: none;
 }
 #showcard .eyebrow {
   display: inline-block;
@@ -471,6 +477,17 @@ nav > * {
 #sheet-peek {
   display: none;
 }
+#sheet-peek .peek-grip {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto 8px;
+  border-radius: 999px;
+  background: rgba(242, 235, 224, 0.28);
+}
+#sheet-peek .peek-label {
+  display: block;
+}
 
 .benefits {
   display: flex;
@@ -682,16 +699,186 @@ nav > * {
 }
 
 @media (max-width: 1100px) {
-  #camcard,
-  #overview {
+  :root {
+    --nav-h: 56px;
+    --sheet-h: min(54vh, 460px);
+    --sheet-peek-h: 52px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+  }
+
+  nav {
+    height: calc(var(--nav-h) + var(--safe-t));
+    padding: var(--safe-t) 14px 0;
+  }
+
+  .brand {
+    font-size: 18px;
+    gap: 8px;
+  }
+
+  .brand-mark {
+    width: 18px;
+    height: 12px;
+  }
+
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .nav-links {
     display: none;
   }
-  #sheet-peek {
-    display: block;
+
+  /* Compact showcard — headline only until expanded */
+  #showcard {
+    top: calc(var(--nav-h) + var(--safe-t) + 10px);
+    left: 12px;
+    right: auto;
+    width: min(220px, calc(100vw - 72px));
+    padding: 12px 12px 10px;
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  #showcard.seat-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+  }
+  #showcard .show-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     width: 100%;
-    margin-bottom: 8px;
-    padding: 10px 14px;
-    border-radius: 12px 12px 0 0;
+    margin-top: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: rgba(12, 10, 11, 0.35);
+    color: var(--dim);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    min-height: 36px;
+  }
+  #showcard .show-chevron {
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  #showcard.expanded .show-chevron {
+    transform: rotate(-135deg);
+    margin-top: 4px;
+  }
+  #showcard .eyebrow {
+    margin-bottom: 6px;
+    font-size: 9px;
+    padding: 2px 7px;
+  }
+  #showcard h2 {
+    font-size: 20px;
+    margin-bottom: 2px;
+  }
+  .show-meta {
+    font-size: 12px;
+    margin-bottom: 0;
+  }
+  #showcard .showcard-body {
+    display: none;
+    margin-top: 10px;
+  }
+  #showcard.expanded {
+    width: min(280px, calc(100vw - 24px));
+  }
+  #showcard.expanded .showcard-body {
+    display: block;
+  }
+  #showcard.expanded .show-toggle-label {
+    color: var(--amber-soft);
+  }
+
+  .show-tags {
+    margin-bottom: 4px;
+  }
+  .hall-btn {
+    min-height: 44px;
+    padding: 10px 6px;
+    font-size: 10px;
+  }
+  .ghost-cta {
+    min-height: 44px;
+    padding: 12px;
+  }
+
+  /* Hide desktop cam minimap; keep seat map in the sheet */
+  #camcard {
+    display: none;
+  }
+
+  /* Bottom sheet */
+  #rightcol {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: auto;
+    max-height: var(--sheet-h);
+    padding: 0 10px calc(12px + var(--safe-b));
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    gap: 8px;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(12, 10, 11, 0.55) 18px,
+      rgba(12, 10, 11, 0.72) 100%
+    );
+  }
+  #rightcol #sheet-peek {
+    order: 0;
+  }
+  #rightcol:not(.has-seat) #overview {
+    order: 1;
+  }
+  #rightcol:not(.has-seat) #seatcard {
+    order: 2;
+  }
+  #rightcol.has-seat #seatcard {
+    order: 1;
+  }
+  #rightcol.has-seat #overview {
+    order: 2;
+  }
+  #rightcol.collapsed {
+    max-height: calc(var(--sheet-peek-h) + var(--safe-b));
+    overflow: hidden;
+    padding-bottom: var(--safe-b);
+    background: transparent;
+  }
+  #rightcol.collapsed #overview,
+  #rightcol.collapsed #seatcard {
+    display: none;
+  }
+
+  #sheet-peek {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: var(--sheet-peek-h);
+    margin: 0;
+    padding: 10px 14px 12px;
+    border-radius: 16px 16px 0 0;
     background: var(--panel);
     border: 1px solid var(--line);
     border-bottom: none;
@@ -700,31 +887,207 @@ nav > * {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--dim);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    backdrop-filter: blur(16px);
   }
-  #rightcol {
-    top: auto;
+  #rightcol:not(.collapsed) #sheet-peek {
+    border-radius: 16px 16px 0 0;
+    color: var(--amber-soft);
+  }
+
+  #overview {
+    display: block;
+    padding: 10px;
+  }
+  #overview canvas {
+    max-height: 180px;
+    width: 100%;
+    height: auto;
+  }
+  #ov-title {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  #seatcard {
+    padding: 12px 12px 14px;
+  }
+  #p-zone {
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+  .seat-grid {
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .seat-grid .cell {
+    padding: 10px 8px;
+  }
+  .preview {
+    aspect-ratio: 16 / 9;
+    margin-bottom: 10px;
+  }
+  .benefits {
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .benefit {
+    font-size: 12px;
+    padding: 5px 0;
+  }
+  #checkout {
+    min-height: 48px;
+    font-size: 15px;
+    padding: 14px 16px;
+  }
+
+  /* Dock / backbar clear the sheet */
+  #dock {
+    bottom: calc(var(--sheet-h) + 10px);
+    padding: 4px;
+    gap: 2px;
+    transition: bottom 0.3s ease, opacity 0.3s, transform 0.3s;
+  }
+  #rightcol.collapsed ~ #dock {
+    bottom: calc(var(--sheet-peek-h) + var(--safe-b) + 10px);
+  }
+  .dock-btn {
+    min-width: 44px;
+    height: 44px;
+    padding: 0 14px;
+    font-size: 15px;
+  }
+
+  #backbar {
+    bottom: calc(var(--sheet-h) + 10px);
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 24px);
+    transition: bottom 0.3s ease, opacity 0.3s, transform 0.3s;
+  }
+  #rightcol.collapsed ~ #backbar {
+    bottom: calc(var(--sheet-peek-h) + var(--safe-b) + 10px);
+  }
+  #bk-exit,
+  #bk-snd {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  #orbit-hint,
+  #sb-hint {
+    top: calc(var(--nav-h) + var(--safe-t) + 10px);
+    left: auto;
+    right: 12px;
+    transform: translateY(-8px);
+    max-width: min(calc(100vw - 240px), 200px);
+    font-size: 11px;
+    padding: 8px 12px;
+  }
+  #orbit-hint.show,
+  #sb-hint.show {
+    transform: translateY(0);
+  }
+
+  #toast {
+    bottom: calc(var(--sheet-peek-h) + var(--safe-b) + 72px);
+    max-width: min(92vw, 360px);
+  }
+
+  #tip {
+    display: none;
+  }
+
+  #rightcol:not(.has-seat) #seatcard .preview,
+  #rightcol:not(.has-seat) #seatcard .benefits,
+  #rightcol:not(.has-seat) #seatcard #checkout {
+    display: none;
+  }
+  #rightcol:not(.has-seat) #p-zone {
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  #rightcol:not(.has-seat) .seat-grid {
+    margin-bottom: 0;
+  }
+
+  /* Seat POV: keep the screen in view — shorter sheet, hide map */
+  body:has(#c.seatmode) {
+    --sheet-h: min(46vh, 400px);
+  }
+  body:has(#c.seatmode) #overview {
+    display: none !important;
+  }
+  body:has(#c.seatmode) #seatcard .benefits {
+    display: none;
+  }
+  body:has(#c.seatmode) #seatcard .preview {
+    aspect-ratio: 2.2 / 1;
+    max-height: 110px;
+  }
+  #seatcard #checkout {
+    position: sticky;
     bottom: 0;
-    right: 0;
-    left: 0;
-    width: auto;
-    max-height: 42vh;
-    padding: 0 12px 88px;
-    overflow: auto;
-    transition: max-height 0.3s ease;
+    z-index: 1;
+    box-shadow: 0 -10px 20px rgba(12, 10, 11, 0.65);
   }
-  #rightcol.collapsed {
-    max-height: 56px;
-    overflow: hidden;
-    padding-bottom: 72px;
+  body:has(#c.seatmode) #rightcol:not(.collapsed) ~ #backbar {
+    bottom: calc(var(--sheet-h) + 10px);
   }
-  #rightcol.collapsed #seatcard {
-    display: none;
+  body:has(#c.seatmode) #rightcol.collapsed ~ #backbar {
+    bottom: calc(var(--sheet-peek-h) + var(--safe-b) + 10px);
   }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --sheet-h: min(58vh, 520px);
+  }
+
   #showcard {
-    width: min(240px, calc(100vw - 40px));
+    width: min(200px, calc(100vw - 64px));
+    padding: 10px 10px 8px;
   }
-  .nav-links {
+  #showcard.expanded {
+    width: calc(100vw - 24px);
+    left: 12px;
+  }
+  #showcard h2 {
+    font-size: 18px;
+  }
+  .show-meta {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  #overview canvas {
+    max-height: 140px;
+  }
+
+  .seat-grid .v {
+    font-size: 15px;
+  }
+
+  /* Shorter preview on small phones so checkout stays reachable */
+  .preview {
+    aspect-ratio: 2 / 1;
+  }
+  .benefits .benefit:nth-child(n + 3) {
     display: none;
+  }
+}
+
+@media (max-width: 1100px) and (max-height: 700px) {
+  :root {
+    --sheet-h: min(48vh, 360px);
+  }
+  #showcard:not(.expanded) .show-meta {
+    display: none;
+  }
+  .preview {
+    aspect-ratio: 2.2 / 1;
   }
 }
 

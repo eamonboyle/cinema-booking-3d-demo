@@ -41,6 +41,8 @@ export type UiRefs = {
   camFooter: HTMLElement
   rightcol: HTMLElement
   sheetPeek: HTMLButtonElement
+  showToggle: HTMLButtonElement
+  showBody: HTMLElement
 }
 
 export function mountOverlay(root: HTMLElement): UiRefs {
@@ -73,17 +75,25 @@ export function mountOverlay(root: HTMLElement): UiRefs {
     </nav>
 
     <section id="showcard" class="panel" aria-label="Now showing">
-      <div class="eyebrow">NOW SHOWING</div>
-      <h2 id="show-title">Night Drive</h2>
-      <div class="show-meta" id="show-meta">Tonight · 19:40 · Screen 3</div>
-      <div class="show-tags" id="show-tags">
-        <span>2h 08m</span>
-        <span>12A</span>
-        <span>Dolby Atmos</span>
+      <div class="show-head">
+        <div class="eyebrow">NOW SHOWING</div>
+        <h2 id="show-title">Night Drive</h2>
+        <div class="show-meta" id="show-meta">Tonight · 19:40 · Screen 3</div>
       </div>
-      <div class="hall-label">Auditorium</div>
-      <div id="hall-picker" class="hall-picker" role="tablist" aria-label="Cinema layout"></div>
-      <button type="button" id="best-btn" class="ghost-cta">Find best seat</button>
+      <button type="button" id="show-toggle" class="show-toggle" aria-expanded="false" aria-controls="showcard-body">
+        <span class="show-toggle-label">Halls &amp; formats</span>
+        <span class="show-chevron" aria-hidden="true"></span>
+      </button>
+      <div id="showcard-body" class="showcard-body">
+        <div class="show-tags" id="show-tags">
+          <span>2h 08m</span>
+          <span>12A</span>
+          <span>Dolby Atmos</span>
+        </div>
+        <div class="hall-label">Auditorium</div>
+        <div id="hall-picker" class="hall-picker" role="tablist" aria-label="Cinema layout"></div>
+        <button type="button" id="best-btn" class="ghost-cta">Find best seat</button>
+      </div>
     </section>
 
     <section id="camcard" class="panel" aria-label="Camera controls">
@@ -97,10 +107,13 @@ export function mountOverlay(root: HTMLElement): UiRefs {
     </section>
 
     <div id="rightcol">
-      <button type="button" id="sheet-peek" aria-expanded="true">Seat details</button>
+      <button type="button" id="sheet-peek" aria-expanded="false">
+        <span class="peek-grip" aria-hidden="true"></span>
+        <span class="peek-label">Seat details</span>
+      </button>
       <section id="overview" class="panel" aria-label="Seat map">
         <header>
-          <div class="panel-title">Seat map · click to select · Shift+click for group</div>
+          <div class="panel-title" id="ov-title">Seat map · click to select · Shift+click for group</div>
         </header>
         <canvas id="ov" width="320" height="220" role="img" aria-label="Interactive seat map"></canvas>
       </section>
@@ -109,7 +122,7 @@ export function mountOverlay(root: HTMLElement): UiRefs {
         <header>
           <div class="label"><span id="p-label">PICK A SEAT</span></div>
         </header>
-        <div id="p-zone">Click any seat in 3D or on the map</div>
+        <div id="p-zone">Select a seat in 3D or on the map</div>
         <div class="seat-grid">
           <div class="cell"><div class="k">Row</div><div class="v" id="p-row">—</div></div>
           <div class="cell"><div class="k">Seat</div><div class="v" id="p-seat">—</div></div>
@@ -143,8 +156,8 @@ export function mountOverlay(root: HTMLElement): UiRefs {
       <button class="dock-btn" id="d-zin" aria-label="Zoom in">+</button>
     </div>
 
-    <div id="orbit-hint">Click a seat · [ ] to browse · Shift+click for a group</div>
-    <div id="sb-hint">Look around · scroll to zoom the screen</div>
+    <div id="orbit-hint">Tap a seat · drag to orbit · pinch to zoom</div>
+    <div id="sb-hint">Drag to look around · pinch to zoom the screen</div>
     <div id="backbar" role="toolbar" aria-label="Seat view controls">
       <button id="bk-exit" type="button">← Back to house</button>
       <button id="bk-snd" type="button" aria-label="Toggle theatre sound">♪</button>
@@ -203,6 +216,8 @@ export function mountOverlay(root: HTMLElement): UiRefs {
     camFooter: $('cam-footer'),
     rightcol: $('rightcol'),
     sheetPeek: $('sheet-peek') as HTMLButtonElement,
+    showToggle: $('show-toggle') as HTMLButtonElement,
+    showBody: $('showcard-body'),
   }
 }
 
@@ -259,7 +274,7 @@ export function updateSeatPanel(
 ): void {
   if (!info || state === 'empty') {
     ui.pLabel.textContent = 'PICK A SEAT'
-    ui.pZone.textContent = 'Click any seat in 3D or on the map'
+    ui.pZone.textContent = 'Select a seat in 3D or on the map'
     ui.pRow.textContent = '—'
     ui.pSeat.textContent = '—'
     ui.pPrice.innerHTML = '€— <span class="unit">/seat</span>'

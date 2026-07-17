@@ -45,9 +45,9 @@ export function drawSeatMap(
   ctx.textAlign = 'center'
   ctx.fillText(HALL.screenCurve > 1 ? 'IMAX SCREEN' : 'SCREEN', W / 2, 24)
 
-  const padX = 28
-  const padTop = 42
-  const usableH = H - padTop - 16
+  const padX = 22
+  const padTop = 40
+  const usableH = H - padTop - 18
   const rowH = usableH / TOTAL_ROWS
 
   // Index lookup: row+seat → idx (built once per draw)
@@ -59,10 +59,11 @@ export function drawSeatMap(
   for (let r = 0; r < TOTAL_ROWS; r++) {
     const n = seatsInRow(r)
     const zone = zoneForRow(r)
-    const y = padTop + r * rowH + rowH * 0.2
+    const y = padTop + r * rowH + rowH * 0.15
     const half = Math.floor(n / 2)
-    const seatW = Math.min(10, (W / 2 - padX - 14) / half - 2)
-    const seatH = rowH * 0.55
+    // Prefer touch-friendly seat chips; scale up on wider canvases
+    const seatW = Math.min(Math.max(8, W >= 300 ? 12 : 9), (W / 2 - padX - 12) / half - 1.5)
+    const seatH = Math.max(rowH * 0.55, 6)
 
     const drawBank = (count: number, startX: number, seatOffset: number) => {
       for (let q = 0; q < count; q++) {
