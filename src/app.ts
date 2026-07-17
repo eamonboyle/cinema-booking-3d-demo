@@ -28,19 +28,42 @@ import {
   mountOverlay,
   toast,
   updateSeatPanel,
+  renderHallPicker,
+  syncShowcard,
 } from './ui/overlay'
 import { drawMinimap, drawSeatMap, hitTestSeatMap } from './ui/minimap'
+import {
+  LAYOUT_ORDER,
+  LAYOUTS,
+  getLayout,
+  setLayout,
+  type CinemaLayoutId,
+} from './cinema/layout'
 
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-const HOME = { theta: -Math.PI / 2 + 0.35, phi: 1.05, radius: 28 }
 const SEL = new Color(0xe8a838)
 const HOV = new Color(0xf0c56a)
 const GROUP = new Color(0xf0c56a)
 const FAV_KEY = 'framesight-favs'
+const LAYOUT_KEY = 'framesight-layout'
+
+function homeOrbit() {
+  const h = getLayout().hall
+  return { theta: -Math.PI / 2 + 0.35, phi: 1.05, radius: h.orbitRadius }
+}
 
 export function startApp(root: HTMLElement): void {
   const ui = mountOverlay(root)
   const rng = mulberry32(20260717)
+
+  try {
+    const saved = localStorage.getItem(LAYOUT_KEY) as CinemaLayoutId | null
+    if (saved && LAYOUTS[saved]) setLayout(saved)
+  } catch {
+    /* ignore */
+  }
+
+  let HOME = homeOrbit()
 
   const renderer = new WebGLRenderer({
     canvas: ui.canvas,
@@ -58,18 +81,21 @@ export function startApp(root: HTMLElement): void {
   const scene = new Scene()
   scene.background = new Color(0x1a1418)
 
-  const camera = new PerspectiveCamera(50, innerWidth / innerHeight, 0.15, 200)
+  const camera = new PerspectiveCamera(50, innerWidth / innerHeight, 0.15, 220)
   const hemi = new HemisphereLight(0xffe8d8, 0x3a2428, 1.15)
   const amb = new AmbientLight(0xfff0e4, 0.85)
   scene.add(hemi, amb)
 
   ui.loaderText.textContent = 'Raising the curtain…'
-  const hall = buildAuditorium(scene, renderer)
-  const screen = createScreen(renderer)
+  let hall = buildAuditorium(scene, renderer)
+  let screen = createScreen(renderer)
   scene.add(screen.group)
 
   ui.loaderText.textContent = 'Placing seats…'
-  const seats = buildSeats(scene, renderer, camera, rng)
+  let seats = buildSeats(scene, renderer, camera, rng)
+
+  let orbitRadiusMin = 12
+  let orbitRadiusMax = getLayout().hall.orbitRadiusMax
 
   // Soft bloom — half-res blur for far less fill cost
   const composer = new EffectComposer(renderer)
@@ -82,8 +108,21 @@ export function startApp(root: HTMLElement): void {
   composer.addPass(bloom)
 
   const audio = new TheatreAudio()
-  const orbit = createOrbit(HOME, new Vector3(0, 2.8, -1))
+  const orbit = createOrbit(HOME, new Vector3(0, getLayout().hall.screenY * 0.45, -1))
   let lastOrbit = { ...HOME }
+
+  function applyLayoutMeta() {
+    const layout = getLayout()
+    syncShowcard(ui, {
+      screenName: layout.name,
+      formatTag: layout.formatTag,
+      tagline: layout.tagline,
+    })
+    HOME = homeOrbit()
+    orbitRadiusMin = Math.max(10, layout.hall.orbitRadius * 0.4)
+    orbitRadiusMax = layout.hall.orbitRadiusMax
+    orbit.target.set(0, layout.hall.screenY * 0.45, -1)
+  }
 
   type Mode = 'orbit' | 'fly' | 'seat'
   let mode: Mode = 'orbit'
@@ -143,7 +182,7 @@ export function startApp(root: HTMLElement): void {
     }
 
     if (mode === 'orbit') {
-      clampOrbit(orbit, 0.25, 1.35, 12, 48)
+      clampOrbit(orbit, 0.25, 1.35, orbitRadiusMin, orbitRadiusMax)
       const dx = Math.abs(orbit.thetaT - orbit.theta)
       const dy = Math.abs(orbit.phiT - orbit.phi)
       const dr = Math.abs(orbit.radiusT - orbit.radius)
@@ -207,7 +246,7 @@ export function startApp(root: HTMLElement): void {
 
   function loadFavs(): Set<number> {
     try {
-      const raw = localStorage.getItem(FAV_KEY)
+      const raw = localStorage.getItem(`${FAV_KEY}-${getLayout().id}`)
       if (!raw) return new Set()
       return new Set(JSON.parse(raw) as number[])
     } catch {
@@ -216,7 +255,7 @@ export function startApp(root: HTMLElement): void {
   }
 
   function saveFavs() {
-    localStorage.setItem(FAV_KEY, JSON.stringify([...favourites]))
+    localStorage.setItem(`${FAV_KEY}-${getLayout().id}`, JSON.stringify([...favourites]))
   }
 
   function syncFavButton() {
@@ -624,7 +663,11 @@ export function startApp(root: HTMLElement): void {
       const p = [...pointers.values()]
       const d = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
       if (pinchDist > 0 && mode === 'orbit') {
-        orbit.radiusT = MathUtils.clamp(orbit.radiusT * (pinchDist / d), 12, 48)
+        orbit.radiusT = MathUtils.clamp(
+          orbit.radiusT * (pinchDist / d),
+          orbitRadiusMin,
+          orbitRadiusMax,
+        )
         invalidate()
       }
       pinchDist = d
@@ -674,7 +717,11 @@ export function startApp(root: HTMLElement): void {
     (e) => {
       e.preventDefault()
       if (mode === 'orbit') {
-        orbit.radiusT = MathUtils.clamp(orbit.radiusT * (1 + e.deltaY * 0.0012), 12, 48)
+        orbit.radiusT = MathUtils.clamp(
+          orbit.radiusT * (1 + e.deltaY * 0.0012),
+          orbitRadiusMin,
+          orbitRadiusMax,
+        )
         invalidate()
       } else if (mode === 'seat') {
         camera.fov = MathUtils.clamp(camera.fov + e.deltaY * 0.02, 28, 65)
@@ -733,11 +780,11 @@ export function startApp(root: HTMLElement): void {
         invalidate()
       }
       if (e.key === '+' || e.key === '=') {
-        orbit.radiusT = Math.max(12, orbit.radiusT - 2)
+        orbit.radiusT = Math.max(orbitRadiusMin, orbit.radiusT - 2)
         invalidate()
       }
       if (e.key === '-') {
-        orbit.radiusT = Math.min(48, orbit.radiusT + 2)
+        orbit.radiusT = Math.min(orbitRadiusMax, orbit.radiusT + 2)
         invalidate()
       }
     }
@@ -823,13 +870,13 @@ export function startApp(root: HTMLElement): void {
   ui.dReset.addEventListener('click', goHome)
   ui.dZin.addEventListener('click', () => {
     if (mode === 'orbit') {
-      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 0.86, 12, 48)
+      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 0.86, orbitRadiusMin, orbitRadiusMax)
       invalidate()
     }
   })
   ui.dZout.addEventListener('click', () => {
     if (mode === 'orbit') {
-      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 1.16, 12, 48)
+      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 1.16, orbitRadiusMin, orbitRadiusMax)
       invalidate()
     }
   })
@@ -841,7 +888,7 @@ export function startApp(root: HTMLElement): void {
     ui.d3d.setAttribute('aria-pressed', is2D ? 'false' : 'true')
     gsap.to(orbit, {
       phiT: is2D ? 0.28 : HOME.phi,
-      radiusT: is2D ? 36 : HOME.radius,
+      radiusT: is2D ? HOME.radius * 1.28 : HOME.radius,
       duration: REDUCED ? 0.1 : 1,
       ease: 'power2.inOut',
       onUpdate: invalidate,
@@ -881,6 +928,109 @@ export function startApp(root: HTMLElement): void {
   paintSelectionColors()
   refreshMap()
   syncFavButton()
+  applyLayoutMeta()
+
+  function mountHallPicker() {
+    renderHallPicker(
+      ui,
+      LAYOUT_ORDER.map((id) => ({
+        id,
+        shortName: LAYOUTS[id].shortName,
+        capacityHint: `${LAYOUTS[id].name} · ${LAYOUTS[id].capacityHint}`,
+      })),
+      getLayout().id,
+      (id) => {
+        void switchHall(id as CinemaLayoutId)
+      },
+    )
+  }
+
+  async function switchHall(id: CinemaLayoutId) {
+    if (id === getLayout().id) return
+    if (mode === 'fly') {
+      toast(ui, 'Wait for the camera, then switch halls')
+      return
+    }
+
+    // Force out of seat preview without the fly-back animation
+    if (mode === 'seat') {
+      gsap.killTweensOf(orbit)
+      gsap.killTweensOf(houseLevel)
+      mode = 'orbit'
+      ui.canvas.classList.remove('seatmode')
+      ui.backbar.classList.remove('show')
+      ui.sbHint.classList.remove('show')
+      ui.dock.classList.remove('hidden')
+      seats.setLabelsVisible(true)
+      audio.setHum(0)
+      dimHouse(1, 0.35)
+    }
+
+    setHover(-1)
+    hideTip()
+    selectedIdx = -1
+    selectedGroup.clear()
+    favourites.clear()
+    // Reload favs for the destination layout after setLayout
+    confirmed = false
+    currentInfo = null
+    clearDeepLink()
+
+    gsap.killTweensOf(orbit)
+    gsap.killTweensOf(houseLevel)
+
+    hall.dispose()
+    scene.remove(screen.group)
+    screen.dispose()
+    seats.dispose()
+
+    setLayout(id)
+    try {
+      localStorage.setItem(LAYOUT_KEY, id)
+    } catch {
+      /* ignore */
+    }
+
+    for (const i of loadFavs()) favourites.add(i)
+
+    applyLayoutMeta()
+    mountHallPicker()
+
+    toast(ui, `${getLayout().name} · ${getLayout().tagline}`, 2800)
+
+    hall = buildAuditorium(scene, renderer)
+    screen = createScreen(renderer)
+    scene.add(screen.group)
+    seats = buildSeats(scene, renderer, camera, rng)
+
+    HOME = homeOrbit()
+    lastOrbit = { ...HOME }
+    orbit.theta = orbit.thetaT = HOME.theta
+    orbit.phi = orbit.phiT = HOME.phi
+    orbit.radius = orbit.radiusT = HOME.radius
+    applyOrbit(camera, orbit)
+    hall.setHouseLevel(1)
+    houseLevel.v = 1
+    hemi.intensity = 1.15
+    amb.intensity = 0.85
+    bloom.strength = 0.28
+
+    filmActive = true
+    screen.setAnimating(true)
+    await screen.openCurtains(true)
+    filmActive = false
+    screen.setAnimating(false)
+
+    paintSelectionColors()
+    refreshMap()
+    syncFavButton()
+    updateSeatPanel(ui, null, 'empty')
+    panelRevealed = true
+    lastMmX = Number.NaN
+    invalidate()
+  }
+
+  mountHallPicker()
 
   applyOrbit(camera, orbit)
   hall.setHouseLevel(1)
@@ -894,7 +1044,7 @@ export function startApp(root: HTMLElement): void {
     setTimeout(() => ui.loader.remove(), 700)
 
     // Camera sweep then settle; reveal panel after
-    const sweep = { ...HOME, theta: HOME.theta - 0.55, radius: 34 }
+    const sweep = { ...HOME, theta: HOME.theta - 0.55, radius: HOME.radius * 1.2 }
     orbit.theta = orbit.thetaT = sweep.theta
     orbit.phi = orbit.phiT = sweep.phi
     orbit.radius = orbit.radiusT = sweep.radius

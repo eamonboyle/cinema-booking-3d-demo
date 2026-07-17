@@ -36,6 +36,8 @@ export type UiRefs = {
   ovCanvas: HTMLCanvasElement
   showTitle: HTMLElement
   showMeta: HTMLElement
+  showTags: HTMLElement
+  hallPicker: HTMLElement
   camFooter: HTMLElement
   rightcol: HTMLElement
   sheetPeek: HTMLButtonElement
@@ -74,11 +76,13 @@ export function mountOverlay(root: HTMLElement): UiRefs {
       <div class="eyebrow">NOW SHOWING</div>
       <h2 id="show-title">Night Drive</h2>
       <div class="show-meta" id="show-meta">Tonight · 19:40 · Screen 3</div>
-      <div class="show-tags">
+      <div class="show-tags" id="show-tags">
         <span>2h 08m</span>
         <span>12A</span>
         <span>Dolby Atmos</span>
       </div>
+      <div class="hall-label">Auditorium</div>
+      <div id="hall-picker" class="hall-picker" role="tablist" aria-label="Cinema layout"></div>
       <button type="button" id="best-btn" class="ghost-cta">Find best seat</button>
     </section>
 
@@ -194,10 +198,49 @@ export function mountOverlay(root: HTMLElement): UiRefs {
     ovCanvas,
     showTitle: $('show-title'),
     showMeta: $('show-meta'),
+    showTags: $('show-tags'),
+    hallPicker: $('hall-picker'),
     camFooter: $('cam-footer'),
     rightcol: $('rightcol'),
     sheetPeek: $('sheet-peek') as HTMLButtonElement,
   }
+}
+
+export function renderHallPicker(
+  ui: UiRefs,
+  layouts: Array<{ id: string; shortName: string; capacityHint: string }>,
+  activeId: string,
+  onSelect: (id: string) => void,
+): void {
+  ui.hallPicker.innerHTML = layouts
+    .map(
+      (l) => `
+      <button type="button" class="hall-btn${l.id === activeId ? ' active' : ''}"
+        role="tab" aria-selected="${l.id === activeId ? 'true' : 'false'}"
+        data-hall="${l.id}" title="${l.capacityHint}">
+        ${l.shortName}
+      </button>`,
+    )
+    .join('')
+  ui.hallPicker.querySelectorAll<HTMLButtonElement>('.hall-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.hall
+      if (id) onSelect(id)
+    })
+  })
+}
+
+export function syncShowcard(
+  ui: UiRefs,
+  meta: { screenName: string; formatTag: string; tagline: string },
+): void {
+  ui.showMeta.textContent = `Tonight · 19:40 · ${meta.screenName}`
+  ui.showTags.innerHTML = `
+    <span>2h 08m</span>
+    <span>12A</span>
+    <span>${meta.formatTag}</span>
+  `
+  ui.showTags.title = meta.tagline
 }
 
 export type PanelState = 'empty' | 'suggested' | 'previewing' | 'confirmed' | 'browsing'

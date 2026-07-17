@@ -30,11 +30,12 @@ export function drawSeatMap(
   ctx.clearRect(0, 0, W, H)
   lastHits = []
 
-  // Screen arc
+  // Screen arc — wider / more curved for large-format halls
+  const curve = Math.min(0.22, 0.08 + HALL.screenCurve * 0.04)
   ctx.fillStyle = '#f2ebe0'
   ctx.beginPath()
-  ctx.moveTo(W * 0.18, 18)
-  ctx.quadraticCurveTo(W / 2, 4, W * 0.82, 18)
+  ctx.moveTo(W * (0.18 - curve * 0.15), 18)
+  ctx.quadraticCurveTo(W / 2, 4 - HALL.screenCurve * 0.8, W * (0.82 + curve * 0.15), 18)
   ctx.lineTo(W * 0.78, 28)
   ctx.quadraticCurveTo(W / 2, 16, W * 0.22, 28)
   ctx.closePath()
@@ -42,7 +43,7 @@ export function drawSeatMap(
   ctx.fillStyle = 'rgba(12,10,11,0.7)'
   ctx.font = '700 9px Manrope, sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText('SCREEN', W / 2, 24)
+  ctx.fillText(HALL.screenCurve > 1 ? 'IMAX SCREEN' : 'SCREEN', W / 2, 24)
 
   const padX = 28
   const padTop = 42
@@ -106,14 +107,16 @@ export function drawSeatMap(
     drawBank(n - half, rightStart, half)
   }
 
-  // Legend
+  // Legend — compact for 3 zones
   ctx.textAlign = 'left'
   ctx.font = '600 8px Manrope, sans-serif'
+  const legendGap = Math.min(100, (W - 24) / Math.max(1, ZONES.length))
   ZONES.forEach((z, i) => {
     ctx.fillStyle = `#${z.color.toString(16).padStart(6, '0')}`
-    ctx.fillRect(12 + i * 100, H - 12, 8, 8)
+    ctx.fillRect(12 + i * legendGap, H - 12, 8, 8)
     ctx.fillStyle = 'rgba(242,235,224,0.65)'
-    ctx.fillText(z.name, 24 + i * 100, H - 5)
+    const label = z.name.length > 12 ? z.name.slice(0, 11) + '…' : z.name
+    ctx.fillText(label, 24 + i * legendGap, H - 5)
   })
 }
 

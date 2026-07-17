@@ -273,6 +273,46 @@ nav > * {
   padding: 4px 9px;
 }
 
+.hall-label {
+  margin-top: 14px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.hall-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.hall-btn {
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(12, 10, 11, 0.35);
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.hall-btn:hover {
+  color: var(--ink);
+  border-color: rgba(242, 235, 224, 0.28);
+}
+
+.hall-btn.active {
+  color: var(--coal);
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
 .ghost-cta {
   margin-top: 14px;
   width: 100%;

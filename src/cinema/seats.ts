@@ -23,8 +23,10 @@ import {
   HALL,
   ROW_LETTERS,
   TOTAL_ROWS,
+  ZONES,
   zoneForRow,
   seatsInRow,
+  getLayout,
   type ZoneDef,
 } from './layout'
 
@@ -67,6 +69,7 @@ export type SeatSystem = {
   setConfirmedGlow: (indices: number[]) => void
   clearConfirmedGlow: () => void
   setLabelsVisible: (visible: boolean) => void
+  dispose: () => void
 }
 
 function seatGeometry() {
@@ -118,6 +121,10 @@ export function buildSeats(
   camera: PerspectiveCamera,
   rng: () => number,
 ): SeatSystem {
+  const layout = getLayout()
+  const disposables: Array<{ dispose: () => void }> = []
+  const sceneObjects: Object3D[] = []
+
   let count = 0
   const rowLayouts: { n: number; z: number; y: number; left: number; right: number }[] = []
   for (let r = 0; r < TOTAL_ROWS; r++) {
@@ -158,54 +165,60 @@ export function buildSeats(
   let featuredIdx = -1
   const labels: Array<Sprite | Mesh> = []
 
+  const featRow = layout.featuredRow
+  const featSeat = layout.featuredSeatApprox
+
   for (let r = 0; r < TOTAL_ROWS; r++) {
-    const layout = rowLayouts[r]!
+    const rowLayout = rowLayouts[r]!
     const zone = zoneForRow(r)
     const zoneIdx = zoneList.indexOf(zone.id)
     const rowStart = idx
 
-    for (let q = 0; q < layout.left; q++) {
+    for (let q = 0; q < rowLayout.left; q++) {
       const x =
         -HALL.aisleHalf -
         HALL.seatSpacing / 2 -
-        (layout.left - 1 - q) * HALL.seatSpacing
-      placeSeat(idx, x, layout.y, layout.z, r, q + 1, zone, zoneIdx, rowStart, layout.n, rng)
-      if (zone.id === 'mid' && r === 6 && q === layout.left - 1) featuredIdx = idx
+        (rowLayout.left - 1 - q) * HALL.seatSpacing
+      const seatNum = q + 1
+      placeSeat(idx, x, rowLayout.y, rowLayout.z, r, seatNum, zone, zoneIdx, rowStart, rowLayout.n, rng)
+      if (r === featRow && Math.abs(seatNum - featSeat) <= 1 && featuredIdx < 0) featuredIdx = idx
       idx++
     }
-    for (let q = 0; q < layout.right; q++) {
+    for (let q = 0; q < rowLayout.right; q++) {
       const x = HALL.aisleHalf + HALL.seatSpacing / 2 + q * HALL.seatSpacing
+      const seatNum = rowLayout.left + q + 1
       placeSeat(
         idx,
         x,
-        layout.y,
-        layout.z,
+        rowLayout.y,
+        rowLayout.z,
         r,
-        layout.left + q + 1,
+        seatNum,
         zone,
         zoneIdx,
         rowStart,
-        layout.n,
+        rowLayout.n,
         rng,
       )
-      if (featuredIdx < 0 && zone.id === 'mid' && r === 6 && q === 0) featuredIdx = idx
+      if (r === featRow && Math.abs(seatNum - featSeat) <= 1 && featuredIdx < 0) featuredIdx = idx
       idx++
     }
 
-    // Floating row letter at aisle edge
     const letter = ROW_LETTERS[r] ?? '?'
     const sprL = makeLabelSprite(letter)
     sprL.position.set(
       -HALL.aisleHalf - 0.55,
-      layout.y + 1.35,
-      layout.z,
+      rowLayout.y + 1.35,
+      rowLayout.z,
     )
     scene.add(sprL)
     labels.push(sprL)
+    sceneObjects.push(sprL)
     const sprR = makeLabelSprite(letter)
-    sprR.position.set(HALL.aisleHalf + 0.55, layout.y + 1.35, layout.z)
+    sprR.position.set(HALL.aisleHalf + 0.55, rowLayout.y + 1.35, rowLayout.z)
     scene.add(sprR)
     labels.push(sprR)
+    sceneObjects.push(sprR)
   }
 
   function placeSeat(
@@ -227,9 +240,9 @@ export function buildSeats(
     seatMesh.setMatrixAt(i, dummy.matrix)
     picker.pickMesh.setMatrixAt(i, dummy.matrix)
 
-    const unavailable =
-      rngFn() < 0.38 &&
-      !(zone.id === 'mid' && row === 6 && Math.abs(seatNum - 9) <= 1)
+    const isFeatured =
+      row === featRow && Math.abs(seatNum - featSeat) <= 1
+    const unavailable = rngFn() < 0.38 && !isFeatured
 
     jitter.setHex(zone.color)
     jitter.offsetHSL(
@@ -258,12 +271,9 @@ export function buildSeats(
   picker.pickMesh.instanceMatrix.needsUpdate = true
   if (seatMesh.instanceColor) seatMesh.instanceColor.needsUpdate = true
   scene.add(seatMesh)
+  sceneObjects.push(seatMesh)
 
-  // Zone name markers along side wall
-  ;(['front', 'mid', 'rear'] as const).forEach((id) => {
-    const z = zoneForRow(
-      id === 'front' ? 1 : id === 'mid' ? 6 : 11,
-    )
+  ZONES.forEach((z) => {
     const midRow = z.rowStart + Math.floor(z.rowCount / 2)
     const y = HALL.seatY0 + midRow * HALL.rake + 2.2
     const zz = HALL.firstRowZ + midRow * HALL.rowSpacing
@@ -274,64 +284,70 @@ export function buildSeats(
     px.fillStyle = 'rgba(12,10,11,0.5)'
     px.fillRect(0, 0, 256, 64)
     px.fillStyle = '#e8a838'
-    px.font = '700 26px Oswald, sans-serif'
+    px.font = '700 22px Oswald, sans-serif'
     px.textAlign = 'center'
     px.textBaseline = 'middle'
     px.fillText(z.name.toUpperCase(), 128, 34)
     const tex = new CanvasTexture(plane)
     tex.colorSpace = SRGBColorSpace
     const m = new Mesh(
-      new PlaneGeometry(3.2, 0.8),
+      new PlaneGeometry(3.4, 0.8),
       new MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }),
     )
     m.position.set(-HALL.width / 2 + 0.25, y, zz)
     m.rotation.y = Math.PI / 2
     scene.add(m)
     labels.push(m)
+    sceneObjects.push(m)
+    disposables.push(tex)
   })
 
-  // Occupied patrons
+  let torsos: InstancedMesh | null = null
+  let heads: InstancedMesh | null = null
   {
     const occ: number[] = []
     for (let i = 0; i < count; i++) if (!meta.avail[i]) occ.push(i)
-    const torsoGeo = (() => {
-      const body = new BoxGeometry(0.4, 0.48, 0.28)
-      body.translate(0, 0.88, -0.02)
-      const lap = new BoxGeometry(0.38, 0.12, 0.36)
-      lap.translate(0, 0.58, 0.12)
-      return mergeBoxes([body, lap])
-    })()
-    const headGeo = new SphereGeometry(0.13, 7, 5)
-    headGeo.translate(0, 1.22, -0.02)
-    const torsoMat = new MeshLambertMaterial()
-    const headMat = new MeshLambertMaterial()
-    const torsos = new InstancedMesh(torsoGeo, torsoMat, occ.length)
-    const heads = new InstancedMesh(headGeo, headMat, occ.length)
-    torsos.frustumCulled = true
-    heads.frustumCulled = true
-    torsos.castShadow = false
-    const cloth = [0x1a1a22, 0xe8e0d4, 0x2a4a6e, 0x4a2a1a, 0x1a3a2a, 0x3a1a3a]
-    const skins = [0x8d5a3b, 0xc98d63, 0xeac1a4, 0x6b4226, 0xa5714b]
-    const dm = new Object3D()
-    const cc = new Color()
-    occ.forEach((si, k) => {
-      dm.position.set(meta.pos[si * 3]!, meta.pos[si * 3 + 1]!, meta.pos[si * 3 + 2]!)
-      dm.rotation.set(0, Math.PI + (rng() - 0.5) * 0.25, 0)
-      const sc = 0.92 + rng() * 0.14
-      dm.scale.setScalar(sc)
-      dm.updateMatrix()
-      torsos.setMatrixAt(k, dm.matrix)
-      heads.setMatrixAt(k, dm.matrix)
-      cc.setHex(cloth[(rng() * cloth.length) | 0]!)
-      torsos.setColorAt(k, cc)
-      cc.setHex(skins[(rng() * skins.length) | 0]!)
-      heads.setColorAt(k, cc)
-    })
-    torsos.instanceMatrix.needsUpdate = true
-    heads.instanceMatrix.needsUpdate = true
-    if (torsos.instanceColor) torsos.instanceColor.needsUpdate = true
-    if (heads.instanceColor) heads.instanceColor.needsUpdate = true
-    scene.add(torsos, heads)
+    if (occ.length > 0) {
+      const torsoGeo = (() => {
+        const body = new BoxGeometry(0.4, 0.48, 0.28)
+        body.translate(0, 0.88, -0.02)
+        const lap = new BoxGeometry(0.38, 0.12, 0.36)
+        lap.translate(0, 0.58, 0.12)
+        return mergeBoxes([body, lap])
+      })()
+      const headGeo = new SphereGeometry(0.13, 7, 5)
+      headGeo.translate(0, 1.22, -0.02)
+      const torsoMat = new MeshLambertMaterial()
+      const headMat = new MeshLambertMaterial()
+      torsos = new InstancedMesh(torsoGeo, torsoMat, occ.length)
+      heads = new InstancedMesh(headGeo, headMat, occ.length)
+      torsos.frustumCulled = true
+      heads.frustumCulled = true
+      torsos.castShadow = false
+      const cloth = [0x1a1a22, 0xe8e0d4, 0x2a4a6e, 0x4a2a1a, 0x1a3a2a, 0x3a1a3a]
+      const skins = [0x8d5a3b, 0xc98d63, 0xeac1a4, 0x6b4226, 0xa5714b]
+      const dm = new Object3D()
+      const cc = new Color()
+      occ.forEach((si, k) => {
+        dm.position.set(meta.pos[si * 3]!, meta.pos[si * 3 + 1]!, meta.pos[si * 3 + 2]!)
+        dm.rotation.set(0, Math.PI + (rng() - 0.5) * 0.25, 0)
+        const sc = 0.92 + rng() * 0.14
+        dm.scale.setScalar(sc)
+        dm.updateMatrix()
+        torsos!.setMatrixAt(k, dm.matrix)
+        heads!.setMatrixAt(k, dm.matrix)
+        cc.setHex(cloth[(rng() * cloth.length) | 0]!)
+        torsos!.setColorAt(k, cc)
+        cc.setHex(skins[(rng() * skins.length) | 0]!)
+        heads!.setColorAt(k, cc)
+      })
+      torsos.instanceMatrix.needsUpdate = true
+      heads.instanceMatrix.needsUpdate = true
+      if (torsos.instanceColor) torsos.instanceColor.needsUpdate = true
+      if (heads.instanceColor) heads.instanceColor.needsUpdate = true
+      scene.add(torsos, heads)
+      sceneObjects.push(torsos, heads)
+    }
   }
 
   if (featuredIdx < 0) featuredIdx = Math.floor(count / 2)
@@ -343,9 +359,10 @@ export function buildSeats(
     const z = meta.pos[i * 3 + 2]!
     const x = meta.pos[i * 3]!
     const dist = Math.abs(z - HALL.screenZ)
-    const distPenalty = MathUtils.clamp(Math.abs(dist - 14) / 12, 0, 1) * 22
+    const distPenalty =
+      MathUtils.clamp(Math.abs(dist - HALL.sweetSpotDist) / (HALL.sweetSpotDist * 0.85), 0, 1) * 22
     const sidePenalty = (Math.abs(x) / (HALL.width / 2)) * 14
-    const rakeBonus = MathUtils.clamp((meta.pos[i * 3 + 1]! - 0.5) / 3, 0, 1) * 6
+    const rakeBonus = MathUtils.clamp((meta.pos[i * 3 + 1]! - 0.5) / (HALL.rake * TOTAL_ROWS + 0.01), 0, 1) * 6
     return Math.round(MathUtils.clamp(94 - distPenalty - sidePenalty + rakeBonus, 52, 99))
   }
 
@@ -450,6 +467,35 @@ export function buildSeats(
     for (const label of labels) label.visible = visible
   }
 
+  function dispose() {
+    for (const obj of sceneObjects) {
+      scene.remove(obj)
+      obj.traverse((child) => {
+        const mesh = child as Mesh
+        const spr = child as Sprite
+        if (mesh.isMesh) {
+          mesh.geometry?.dispose()
+          const mats = Array.isArray(mesh.material)
+            ? mesh.material
+            : mesh.material
+              ? [mesh.material]
+              : []
+          for (const m of mats) {
+            const map = (m as MeshBasicMaterial).map
+            map?.dispose()
+            m.dispose()
+          }
+        } else if (spr.isSprite) {
+          const sm = spr.material as SpriteMaterial
+          sm.map?.dispose()
+          sm.dispose()
+        }
+      })
+    }
+    picker.dispose()
+    for (const d of disposables) d.dispose()
+  }
+
   return {
     seatMesh,
     picker,
@@ -469,5 +515,6 @@ export function buildSeats(
     setConfirmedGlow,
     clearConfirmedGlow,
     setLabelsVisible,
+    dispose,
   }
 }

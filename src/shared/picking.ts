@@ -80,4 +80,11 @@ export class GpuPicker {
     const id = (this.pickBuf[0]! << 16) | (this.pickBuf[1]! << 8) | this.pickBuf[2]!
     return id === 0 ? -1 : id - 1
   }
+
+  dispose(): void {
+    this.pickScene.remove(this.pickMesh)
+    this.pickMesh.geometry.dispose()
+    ;(this.pickMesh.material as ShaderMaterial).dispose()
+    this.pickRT.dispose()
+  }
 }
