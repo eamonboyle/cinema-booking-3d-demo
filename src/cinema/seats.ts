@@ -6,7 +6,7 @@ import {
   MathUtils,
   Mesh,
   MeshBasicMaterial,
-  MeshPhongMaterial,
+  MeshLambertMaterial,
   Object3D,
   PlaneGeometry,
   SphereGeometry,
@@ -130,10 +130,10 @@ export function buildSeats(
   }
 
   const geo = seatGeometry()
-  const mat = new MeshPhongMaterial({ shininess: 28, specular: 0x2a1a1c })
+  const mat = new MeshLambertMaterial({ color: 0xffffff })
   const seatMesh = new InstancedMesh(geo, mat, count)
-  seatMesh.frustumCulled = false
-  seatMesh.castShadow = true
+  seatMesh.frustumCulled = true
+  seatMesh.castShadow = false
   seatMesh.receiveShadow = true
 
   const pickGeo = new BoxGeometry(0.58, 1.15, 0.55)
@@ -303,13 +303,13 @@ export function buildSeats(
     })()
     const headGeo = new SphereGeometry(0.13, 7, 5)
     headGeo.translate(0, 1.22, -0.02)
-    const torsoMat = new MeshPhongMaterial({ shininess: 8 })
-    const headMat = new MeshPhongMaterial({ shininess: 12 })
+    const torsoMat = new MeshLambertMaterial()
+    const headMat = new MeshLambertMaterial()
     const torsos = new InstancedMesh(torsoGeo, torsoMat, occ.length)
     const heads = new InstancedMesh(headGeo, headMat, occ.length)
-    torsos.frustumCulled = false
-    heads.frustumCulled = false
-    torsos.castShadow = true
+    torsos.frustumCulled = true
+    heads.frustumCulled = true
+    torsos.castShadow = false
     const cloth = [0x1a1a22, 0xe8e0d4, 0x2a4a6e, 0x4a2a1a, 0x1a3a2a, 0x3a1a3a]
     const skins = [0x8d5a3b, 0xc98d63, 0xeac1a4, 0x6b4226, 0xa5714b]
     const dm = new Object3D()

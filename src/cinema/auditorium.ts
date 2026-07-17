@@ -117,36 +117,36 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Auditori
     root.add(sign)
   })
 
-  // House fill over seating
-  const houseFill = new DirectionalLight(0xfff2e4, 1.35)
+  // House fill over seating — single shadow-casting key light (512² Basic map)
+  const houseFill = new DirectionalLight(0xfff2e4, 1.55)
   houseFill.position.set(4, 14, 8)
   houseFill.castShadow = true
-  houseFill.shadow.mapSize.set(1024, 1024)
+  houseFill.shadow.mapSize.set(512, 512)
   houseFill.shadow.camera.near = 2
   houseFill.shadow.camera.far = 40
   houseFill.shadow.camera.left = -14
   houseFill.shadow.camera.right = 14
   houseFill.shadow.camera.top = 18
   houseFill.shadow.camera.bottom = -10
-  houseFill.shadow.bias = -0.0008
+  houseFill.shadow.bias = -0.001
   root.add(houseFill)
-  houseLights.push({ light: houseFill, intensity: 1.35 })
+  houseLights.push({ light: houseFill, intensity: 1.55 })
 
-  const houseFill2 = new DirectionalLight(0xffe0c8, 0.7)
+  const houseFill2 = new DirectionalLight(0xffe0c8, 0.85)
   houseFill2.position.set(-6, 10, -2)
   root.add(houseFill2)
-  houseLights.push({ light: houseFill2, intensity: 0.7 })
+  houseLights.push({ light: houseFill2, intensity: 0.85 })
 
-  // Ceiling house lights
-  for (let i = 0; i < 4; i++) {
-    const z = -6 + i * 5.5
-    const pl = new PointLight(0xfff0e0, 2.2, 16, 1.4)
+  // Ceiling house lights (2 instead of 4 — fill baked into hemi/ambient)
+  for (let i = 0; i < 2; i++) {
+    const z = -4 + i * 10
+    const pl = new PointLight(0xfff0e0, 2.8, 18, 1.4)
     pl.position.set(0, HALL.height - 1.2, z)
     root.add(pl)
-    houseLights.push({ light: pl, intensity: 2.2 })
+    houseLights.push({ light: pl, intensity: 2.8 })
   }
 
-  // Wall sconces
+  // Wall sconces — visual bulbs only; light from a sparse pair of points
   const sconceMat = new MeshBasicMaterial({ color: 0xffc858 })
   for (let i = 0; i < 5; i++) {
     const z = -8 + i * 5
@@ -154,11 +154,13 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Auditori
       const bulb = new Mesh(new CylinderGeometry(0.08, 0.1, 0.15, 8), sconceMat)
       bulb.position.set(side * (HALL.width / 2 - 0.35), 2.8, z)
       root.add(bulb)
-      const pl = new PointLight(0xffc878, 1.8, 14, 1.5)
-      pl.position.copy(bulb.position)
-      root.add(pl)
-      houseLights.push({ light: pl, intensity: 1.8 })
     })
+  }
+  for (const side of [-1, 1] as const) {
+    const pl = new PointLight(0xffc878, 2.4, 16, 1.5)
+    pl.position.set(side * (HALL.width / 2 - 0.35), 2.8, 2)
+    root.add(pl)
+    houseLights.push({ light: pl, intensity: 2.4 })
   }
 
   // Screen wash light

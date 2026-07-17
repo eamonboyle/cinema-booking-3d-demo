@@ -47,7 +47,7 @@ export class GpuPicker {
       }),
       count,
     )
-    this.pickMesh.frustumCulled = false
+    this.pickMesh.frustumCulled = true
     this.pickScene.background = null
     this.pickScene.add(this.pickMesh)
 

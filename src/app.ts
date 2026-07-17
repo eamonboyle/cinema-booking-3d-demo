@@ -7,7 +7,7 @@ import {
   Color,
   HemisphereLight,
   MathUtils,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
@@ -44,16 +44,16 @@ export function startApp(root: HTMLElement): void {
 
   const renderer = new WebGLRenderer({
     canvas: ui.canvas,
-    antialias: true,
-    powerPreference: 'high-performance',
+    antialias: false,
+    powerPreference: 'default',
   })
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25))
   renderer.setSize(innerWidth, innerHeight)
   renderer.outputColorSpace = SRGBColorSpace
   renderer.toneMapping = ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.35
   renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = PCFSoftShadowMap
+  renderer.shadowMap.type = PCFShadowMap
 
   const scene = new Scene()
   scene.background = new Color(0x1a1418)
@@ -71,10 +71,14 @@ export function startApp(root: HTMLElement): void {
   ui.loaderText.textContent = 'Placing seats…'
   const seats = buildSeats(scene, renderer, camera, rng)
 
-  // Soft bloom on the glowing screen
+  // Soft bloom — half-res blur for far less fill cost
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new Vector2(innerWidth, innerHeight), 0.35, 0.6, 0.82)
+  const bloomRes = new Vector2(
+    Math.max(1, Math.floor(innerWidth * 0.5)),
+    Math.max(1, Math.floor(innerHeight * 0.5)),
+  )
+  const bloom = new UnrealBloomPass(bloomRes, 0.28, 0.55, 0.85)
   composer.addPass(bloom)
 
   const audio = new TheatreAudio()
@@ -99,6 +103,106 @@ export function startApp(root: HTMLElement): void {
     pitchBase: 0,
     yawOff: 0,
     pitchOff: 0,
+  }
+  const seatLookDir = new Vector3()
+  const seatLookAt = new Vector3()
+
+  // Demand-driven render: only burn GPU when something actually changed
+  let dirty = true
+  let looping = false
+  let filmActive = true
+  let lastHoverPick = 0
+  let lastMmX = Number.NaN
+  let lastMmZ = Number.NaN
+  const ORBIT_EPS = 1e-4
+  const HOVER_PICK_MS = 90
+
+  function invalidate() {
+    dirty = true
+    schedule()
+  }
+
+  function schedule() {
+    if (looping || document.hidden) return
+    looping = true
+    requestAnimationFrame(tick)
+  }
+
+  const clock0 = performance.now()
+  function tick() {
+    looping = false
+    if (document.hidden) return
+
+    const t = (performance.now() - clock0) / 1000
+    let keepGoing = false
+
+    if (filmActive) {
+      screen.update(t)
+      dirty = true
+      keepGoing = true
+    }
+
+    if (mode === 'orbit') {
+      clampOrbit(orbit, 0.25, 1.35, 12, 48)
+      const dx = Math.abs(orbit.thetaT - orbit.theta)
+      const dy = Math.abs(orbit.phiT - orbit.phi)
+      const dr = Math.abs(orbit.radiusT - orbit.radius)
+      if (dx > ORBIT_EPS || dy > ORBIT_EPS || dr > ORBIT_EPS) {
+        dampOrbit(orbit, 0.14)
+        applyOrbit(camera, orbit)
+        dirty = true
+        keepGoing = true
+      } else {
+        orbit.theta = orbit.thetaT
+        orbit.phi = orbit.phiT
+        orbit.radius = orbit.radiusT
+      }
+      if (pendingHover) {
+        const now = performance.now()
+        if (now - lastHoverPick >= HOVER_PICK_MS) {
+          lastHoverPick = now
+          const hx = pendingHover.x
+          const hy = pendingHover.y
+          pendingHover = null
+          const idx = seats.picker.pickAt(hx, hy, ui.canvas)
+          setHover(idx)
+          if (idx >= 0) showTip(hx + 16, hy + 16, seats.seatInfo(idx))
+          else hideTip()
+          dirty = true
+        } else {
+          keepGoing = true
+        }
+      }
+    } else if (mode === 'seat') {
+      const yaw = seatView.yawBase + seatView.yawOff
+      const pitch = seatView.pitchBase + seatView.pitchOff
+      seatLookDir.set(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch),
+      )
+      camera.position.copy(seatView.eye)
+      seatLookAt.copy(seatView.eye).add(seatLookDir)
+      camera.lookAt(seatLookAt)
+    }
+
+    if (dirty) {
+      const cx = camera.position.x
+      const cz = camera.position.z
+      if (
+        Number.isNaN(lastMmX) ||
+        Math.abs(cx - lastMmX) > 0.08 ||
+        Math.abs(cz - lastMmZ) > 0.08
+      ) {
+        drawMinimap(ui.mm, cx, camera.position.y, cz)
+        lastMmX = cx
+        lastMmZ = cz
+      }
+      composer.render()
+      dirty = false
+    }
+
+    if (keepGoing || dirty) schedule()
   }
 
   function loadFavs(): Set<number> {
@@ -150,6 +254,7 @@ export function startApp(root: HTMLElement): void {
     if (selectedIdx >= 0) seats.seatMesh.setColorAt(selectedIdx, SEL)
     if (confirmed) seats.setConfirmedGlow(groupStats().idxs)
     seats.flushColors()
+    invalidate()
   }
 
   function applySelection(i: number, opts?: { add?: boolean; fly?: boolean }) {
@@ -203,6 +308,7 @@ export function startApp(root: HTMLElement): void {
       if (selectedIdx >= 0) seats.seatMesh.setColorAt(selectedIdx, SEL)
     }
     seats.flushColors()
+    invalidate()
   }
 
   function captureView(i: number) {
@@ -242,8 +348,10 @@ export function startApp(root: HTMLElement): void {
         hall.screenBounce.intensity = MathUtils.lerp(22, 12, houseLevel.v)
         const beamMat = hall.beam.material as { opacity: number }
         beamMat.opacity = MathUtils.lerp(0.28, 0.12, houseLevel.v)
-        bloom.strength = MathUtils.lerp(0.7, 0.28, houseLevel.v)
+        bloom.strength = MathUtils.lerp(0.55, 0.22, houseLevel.v)
+        invalidate()
       },
+      onComplete: invalidate,
     })
   }
 
@@ -269,6 +377,7 @@ export function startApp(root: HTMLElement): void {
     panelRevealed = true
     updateSeatPanel(ui, info, 'previewing', groupStats())
     captureView(info.i)
+    invalidate()
   }
 
   function flyToSeat(i: number) {
@@ -316,6 +425,7 @@ export function startApp(root: HTMLElement): void {
         camera.lookAt(lp)
         camera.fov = MathUtils.lerp(startFov, 52, MathUtils.smoothstep(st.t, 0.3, 1))
         camera.updateProjectionMatrix()
+        invalidate()
       },
       onComplete() {
         enterSeatMode(info)
@@ -363,6 +473,7 @@ export function startApp(root: HTMLElement): void {
         camera.lookAt(lp)
         camera.fov = MathUtils.lerp(startFov, 50, MathUtils.smoothstep(st.t, 0, 0.7))
         camera.updateProjectionMatrix()
+        invalidate()
       },
       onComplete() {
         mode = 'orbit'
@@ -374,6 +485,7 @@ export function startApp(root: HTMLElement): void {
             groupStats(),
           )
         }
+        invalidate()
       },
     })
     audio.setLevel(0.015)
@@ -500,7 +612,10 @@ export function startApp(root: HTMLElement): void {
 
   ui.canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) {
-      if (mode === 'orbit') pendingHover = { x: e.clientX, y: e.clientY }
+      if (mode === 'orbit') {
+        pendingHover = { x: e.clientX, y: e.clientY }
+        schedule()
+      }
       return
     }
     const prev = pointers.get(e.pointerId)!
@@ -513,6 +628,7 @@ export function startApp(root: HTMLElement): void {
       const d = Math.hypot(p[0]!.x - p[1]!.x, p[0]!.y - p[1]!.y)
       if (pinchDist > 0 && mode === 'orbit') {
         orbit.radiusT = MathUtils.clamp(orbit.radiusT * (pinchDist / d), 12, 48)
+        invalidate()
       }
       pinchDist = d
       return
@@ -521,9 +637,11 @@ export function startApp(root: HTMLElement): void {
       orbit.thetaT -= dx * 0.005
       orbit.phiT = MathUtils.clamp(orbit.phiT - dy * 0.0035, 0.25, 1.35)
       hideTip()
+      invalidate()
     } else if (mode === 'seat') {
       seatView.yawOff = MathUtils.clamp(seatView.yawOff - dx * 0.003, -1.1, 1.1)
       seatView.pitchOff = MathUtils.clamp(seatView.pitchOff + dy * 0.0022, -0.4, 0.45)
+      invalidate()
     }
   })
 
@@ -549,6 +667,7 @@ export function startApp(root: HTMLElement): void {
     if (mode === 'orbit') {
       setHover(-1)
       hideTip()
+      invalidate()
     }
     pendingHover = null
   })
@@ -559,9 +678,11 @@ export function startApp(root: HTMLElement): void {
       e.preventDefault()
       if (mode === 'orbit') {
         orbit.radiusT = MathUtils.clamp(orbit.radiusT * (1 + e.deltaY * 0.0012), 12, 48)
+        invalidate()
       } else if (mode === 'seat') {
         camera.fov = MathUtils.clamp(camera.fov + e.deltaY * 0.02, 28, 65)
         camera.updateProjectionMatrix()
+        invalidate()
       }
     },
     { passive: false },
@@ -598,12 +719,30 @@ export function startApp(root: HTMLElement): void {
     }
     if (e.key === 'b' && !e.metaKey && !e.ctrlKey) goBestSeat()
     if (mode === 'orbit') {
-      if (e.key === 'ArrowLeft') orbit.thetaT += 0.1
-      if (e.key === 'ArrowRight') orbit.thetaT -= 0.1
-      if (e.key === 'ArrowUp') orbit.phiT = Math.max(0.25, orbit.phiT - 0.08)
-      if (e.key === 'ArrowDown') orbit.phiT = Math.min(1.35, orbit.phiT + 0.08)
-      if (e.key === '+' || e.key === '=') orbit.radiusT = Math.max(12, orbit.radiusT - 2)
-      if (e.key === '-') orbit.radiusT = Math.min(48, orbit.radiusT + 2)
+      if (e.key === 'ArrowLeft') {
+        orbit.thetaT += 0.1
+        invalidate()
+      }
+      if (e.key === 'ArrowRight') {
+        orbit.thetaT -= 0.1
+        invalidate()
+      }
+      if (e.key === 'ArrowUp') {
+        orbit.phiT = Math.max(0.25, orbit.phiT - 0.08)
+        invalidate()
+      }
+      if (e.key === 'ArrowDown') {
+        orbit.phiT = Math.min(1.35, orbit.phiT + 0.08)
+        invalidate()
+      }
+      if (e.key === '+' || e.key === '=') {
+        orbit.radiusT = Math.max(12, orbit.radiusT - 2)
+        invalidate()
+      }
+      if (e.key === '-') {
+        orbit.radiusT = Math.min(48, orbit.radiusT + 2)
+        invalidate()
+      }
     }
   })
 
@@ -676,6 +815,8 @@ export function startApp(root: HTMLElement): void {
       radiusT: HOME.radius,
       duration: REDUCED ? 0.1 : 1.1,
       ease: 'power2.inOut',
+      onUpdate: invalidate,
+      onComplete: invalidate,
     })
     is2D = false
     ui.d3d.textContent = '3D'
@@ -684,10 +825,16 @@ export function startApp(root: HTMLElement): void {
   }
   ui.dReset.addEventListener('click', goHome)
   ui.dZin.addEventListener('click', () => {
-    if (mode === 'orbit') orbit.radiusT = MathUtils.clamp(orbit.radiusT * 0.86, 12, 48)
+    if (mode === 'orbit') {
+      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 0.86, 12, 48)
+      invalidate()
+    }
   })
   ui.dZout.addEventListener('click', () => {
-    if (mode === 'orbit') orbit.radiusT = MathUtils.clamp(orbit.radiusT * 1.16, 12, 48)
+    if (mode === 'orbit') {
+      orbit.radiusT = MathUtils.clamp(orbit.radiusT * 1.16, 12, 48)
+      invalidate()
+    }
   })
   ui.d3d.addEventListener('click', () => {
     if (mode !== 'orbit') return
@@ -700,6 +847,8 @@ export function startApp(root: HTMLElement): void {
       radiusT: is2D ? 36 : HOME.radius,
       duration: REDUCED ? 0.1 : 1,
       ease: 'power2.inOut',
+      onUpdate: invalidate,
+      onComplete: invalidate,
     })
   })
 
@@ -714,10 +863,18 @@ export function startApp(root: HTMLElement): void {
     camera.updateProjectionMatrix()
     renderer.setSize(innerWidth, innerHeight)
     composer.setSize(innerWidth, innerHeight)
-    bloom.setSize(innerWidth, innerHeight)
+    bloom.setSize(
+      Math.max(1, Math.floor(innerWidth * 0.5)),
+      Math.max(1, Math.floor(innerHeight * 0.5)),
+    )
+    invalidate()
   }
   addEventListener('resize', onResize)
   onResize()
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) invalidate()
+  })
 
   // Boot: deep link or featured — panel syncs after intro
   const deepIdx = parseDeepLink()
@@ -756,15 +913,22 @@ export function startApp(root: HTMLElement): void {
         radiusT: HOME.radius,
         duration: REDUCED ? 0.2 : 2.2,
         ease: 'power2.inOut',
-        onUpdate: () => applyOrbit(camera, orbit),
+        onUpdate: () => {
+          applyOrbit(camera, orbit)
+          invalidate()
+        },
         onComplete: () => resolve(),
       })
     })
 
     dimHouse(1, 0.9)
+    // Freeze film plate in orbit — biggest idle CPU/GPU win
+    filmActive = false
+    screen.setAnimating(false)
     panelRevealed = true
     updateSeatPanel(ui, currentInfo!, 'suggested', groupStats())
     captureView(bootIdx)
+    invalidate()
     ui.orbitHint.classList.add('show')
     setTimeout(() => ui.orbitHint.classList.remove('show'), 5200)
 
@@ -774,40 +938,6 @@ export function startApp(root: HTMLElement): void {
   }
 
   void playIntro()
-
-  const clock0 = performance.now()
-  function tick() {
-    const t = (performance.now() - clock0) / 1000
-    screen.update(t)
-
-    if (mode === 'orbit') {
-      clampOrbit(orbit, 0.25, 1.35, 12, 48)
-      dampOrbit(orbit, 0.14)
-      applyOrbit(camera, orbit)
-      if (pendingHover) {
-        const idx = seats.picker.pickAt(pendingHover.x, pendingHover.y, ui.canvas)
-        setHover(idx)
-        if (idx >= 0) showTip(pendingHover.x + 16, pendingHover.y + 16, seats.seatInfo(idx))
-        else hideTip()
-        pendingHover = null
-      }
-    } else if (mode === 'seat') {
-      const yaw = seatView.yawBase + seatView.yawOff
-      const pitch = seatView.pitchBase + seatView.pitchOff
-      const dir = new Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        Math.cos(yaw) * Math.cos(pitch),
-      )
-      camera.position.copy(seatView.eye)
-      camera.lookAt(seatView.eye.clone().add(dir))
-    }
-
-    drawMinimap(ui.mm, camera.position.x, camera.position.y, camera.position.z)
-    composer.render()
-    requestAnimationFrame(tick)
-  }
-  requestAnimationFrame(tick)
 
   // Mobile cam footer hint
   if (matchMedia('(max-width: 1100px)').matches) {

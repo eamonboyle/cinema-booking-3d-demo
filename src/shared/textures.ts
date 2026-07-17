@@ -14,7 +14,7 @@ export function canvasTexture(
   const ctx = cv.getContext('2d')!
   draw(ctx, w, h)
   const t = new CanvasTexture(cv)
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy()
+  t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())
   t.colorSpace = SRGBColorSpace
   if (repX || repY) {
     t.wrapS = t.wrapT = RepeatWrapping

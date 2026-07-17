@@ -17,6 +17,7 @@ export type ScreenHandle = {
   group: Group
   glow: Mesh
   update: (t: number) => void
+  setAnimating: (on: boolean) => void
   openCurtains: (reduced: boolean) => Promise<void>
 }
 
@@ -24,13 +25,15 @@ export type ScreenHandle = {
 export function createScreen(renderer: WebGLRenderer): ScreenHandle {
   const group = new Group()
 
+  // Half-res film plate — enough for a distant screen, far less CPU/GPU upload
   const cv = document.createElement('canvas')
-  cv.width = 1024
-  cv.height = 576
+  cv.width = 512
+  cv.height = 288
   const ctx = cv.getContext('2d')!
   const tex = new CanvasTexture(cv)
   tex.colorSpace = SRGBColorSpace
-  tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
+  tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())
+  let animating = true
 
   const plate = new Mesh(
     new PlaneGeometry(HALL.screenW, HALL.screenH),
@@ -111,7 +114,7 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
   group.add(traveller)
 
   let lastPaint = -1
-  const FRAME_DT = 1 / 20
+  const FRAME_DT = 1 / 12
 
   function paintFilm(t: number): void {
     const w = cv.width
@@ -134,7 +137,7 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
 
     // City lights
     ctx.globalAlpha = 0.55
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 24; i++) {
       const bx = ((i * 97 + t * 12) % w)
       const by = h * 0.42 + (i % 7) * 6
       ctx.fillStyle = i % 3 ? '#f0c868' : '#88aaff'
@@ -143,8 +146,8 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
     ctx.globalAlpha = 1
 
     ctx.strokeStyle = 'rgba(232, 200, 120, 0.35)'
-    ctx.lineWidth = 3
-    const vanishX = w * 0.5 + Math.sin(t * 0.15) * 40
+    ctx.lineWidth = 2
+    const vanishX = w * 0.5 + Math.sin(t * 0.15) * 20
     const vanishY = h * 0.52
     for (let i = -4; i <= 4; i++) {
       ctx.beginPath()
@@ -157,7 +160,7 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
       const p = ((t * 0.08 + i * 0.2) % 1)
       const y = h * 0.56 + p * h * 0.38
       const scale = 0.25 + p * 1.4
-      const x = vanishX + Math.sin(i * 2.1 + t * 0.3) * (40 + p * 120)
+      const x = vanishX + Math.sin(i * 2.1 + t * 0.3) * (20 + p * 60)
       ctx.fillStyle = i % 2 ? '#1a1a22' : '#2a1818'
       ctx.fillRect(x - 28 * scale, y - 10 * scale, 56 * scale, 16 * scale)
       ctx.fillStyle = '#f0d080'
@@ -167,18 +170,18 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
     }
 
     ctx.fillStyle = 'rgba(242, 235, 224, 0.92)'
-    ctx.font = '700 42px "Oswald", sans-serif'
+    ctx.font = '700 28px "Oswald", sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText('NIGHT DRIVE', w / 2, h * 0.28)
-    ctx.font = '400 20px "Manrope", sans-serif'
+    ctx.font = '400 14px "Manrope", sans-serif'
     ctx.fillStyle = 'rgba(242, 235, 224, 0.55)'
     ctx.fillText('A Feature Presentation', w / 2, h * 0.34)
 
-    // Lighter grain (throttled already)
-    ctx.globalAlpha = 0.07
-    for (let i = 0; i < 420; i++) {
-      ctx.fillStyle = Math.random() > 0.5 ? '#fff' : '#000'
-      ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2)
+    // Sparse static-ish grain (far fewer random fills)
+    ctx.globalAlpha = 0.06
+    for (let i = 0; i < 80; i++) {
+      ctx.fillStyle = (i + (t * 3) | 0) % 2 ? '#fff' : '#000'
+      ctx.fillRect(((i * 47) % w), ((i * 91 + (t * 8) | 0) % h), 2, 2)
     }
     ctx.globalAlpha = 1
 
@@ -226,7 +229,11 @@ export function createScreen(renderer: WebGLRenderer): ScreenHandle {
     group,
     glow,
     openCurtains,
+    setAnimating(on: boolean) {
+      animating = on
+    },
     update(t: number) {
+      if (!animating) return
       if (lastPaint < 0 || t - lastPaint >= FRAME_DT) {
         paintFilm(t)
         lastPaint = t
