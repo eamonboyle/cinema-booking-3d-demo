@@ -273,6 +273,24 @@ nav > * {
   padding: 4px 9px;
 }
 
+.ghost-cta {
+  margin-top: 14px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(232, 168, 56, 0.45);
+  color: var(--amber-soft);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.ghost-cta:hover {
+  background: rgba(232, 168, 56, 0.12);
+  color: var(--amber);
+}
+
 #camcard {
   bottom: 28px;
   left: 22px;
@@ -408,6 +426,10 @@ nav > * {
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 6px;
+}
+
+#sheet-peek {
+  display: none;
 }
 
 .benefits {
@@ -548,7 +570,8 @@ nav > * {
   color: var(--amber);
 }
 
-#sb-hint {
+#sb-hint,
+#orbit-hint {
   position: fixed;
   top: 88px;
   left: 50%;
@@ -564,8 +587,11 @@ nav > * {
   pointer-events: none;
   transition: opacity 0.35s, transform 0.35s;
   backdrop-filter: blur(12px);
+  max-width: min(92vw, 420px);
+  text-align: center;
 }
-#sb-hint.show {
+#sb-hint.show,
+#orbit-hint.show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -620,6 +646,21 @@ nav > * {
   #overview {
     display: none;
   }
+  #sheet-peek {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 10px 14px;
+    border-radius: 12px 12px 0 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-bottom: none;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
   #rightcol {
     top: auto;
     bottom: 0;
@@ -629,6 +670,15 @@ nav > * {
     max-height: 42vh;
     padding: 0 12px 88px;
     overflow: auto;
+    transition: max-height 0.3s ease;
+  }
+  #rightcol.collapsed {
+    max-height: 56px;
+    overflow: hidden;
+    padding-bottom: 72px;
+  }
+  #rightcol.collapsed #seatcard {
+    display: none;
   }
   #showcard {
     width: min(240px, calc(100vw - 40px));

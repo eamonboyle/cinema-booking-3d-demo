@@ -1,15 +1,34 @@
 import { HALL, TOTAL_ROWS, zoneForRow, seatsInRow, ZONES } from '../cinema/layout'
 import type { SeatSystem } from '../cinema/seats'
 
+export type SeatMapHit = {
+  idx: number
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Layout cache so hit-testing matches the last draw. */
+let lastHits: SeatMapHit[] = []
+
 export function drawSeatMap(
   ctx: CanvasRenderingContext2D,
   seats: SeatSystem,
-  selectedIdx: number,
+  selected: ReadonlySet<number> | number,
+  opts?: { favourites?: ReadonlySet<number> },
 ): void {
+  const selectedSet =
+    typeof selected === 'number'
+      ? new Set(selected >= 0 ? [selected] : [])
+      : selected
+  const favs = opts?.favourites
+
   const cv = ctx.canvas
   const W = cv.width
   const H = cv.height
   ctx.clearRect(0, 0, W, H)
+  lastHits = []
 
   // Screen arc
   ctx.fillStyle = '#f2ebe0'
@@ -30,33 +49,54 @@ export function drawSeatMap(
   const usableH = H - padTop - 16
   const rowH = usableH / TOTAL_ROWS
 
+  // Index lookup: row+seat → idx (built once per draw)
+  const indexOf = new Map<string, number>()
+  for (let i = 0; i < seats.count; i++) {
+    indexOf.set(`${seats.meta.row[i]}:${seats.meta.seatNum[i]}`, i)
+  }
+
   for (let r = 0; r < TOTAL_ROWS; r++) {
     const n = seatsInRow(r)
     const zone = zoneForRow(r)
     const y = padTop + r * rowH + rowH * 0.2
     const half = Math.floor(n / 2)
     const seatW = Math.min(10, (W / 2 - padX - 14) / half - 2)
+    const seatH = rowH * 0.55
 
     const drawBank = (count: number, startX: number, seatOffset: number) => {
       for (let q = 0; q < count; q++) {
-        // Find index roughly
-        let idx = -1
         const seatNum = seatOffset + q + 1
-        for (let i = 0; i < seats.count; i++) {
-          if (seats.meta.row[i] === r && seats.meta.seatNum[i] === seatNum) {
-            idx = i
-            break
-          }
-        }
+        const idx = indexOf.get(`${r}:${seatNum}`) ?? -1
         const x = startX + q * (seatW + 2)
-        if (idx === selectedIdx) ctx.fillStyle = '#e8a838'
+
+        if (idx >= 0 && selectedSet.has(idx)) ctx.fillStyle = '#e8a838'
         else if (idx >= 0 && !seats.meta.avail[idx]) ctx.fillStyle = '#2a1a1e'
+        else if (idx >= 0 && favs?.has(idx)) ctx.fillStyle = '#c47828'
         else {
           const c = zone.color
           ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`
         }
-        roundRect(ctx, x, y, seatW, rowH * 0.55, 2)
+        roundRect(ctx, x, y, seatW, seatH, 2)
         ctx.fill()
+
+        // Hatch for unavailable (colour-blind friendly)
+        if (idx >= 0 && !seats.meta.avail[idx]) {
+          ctx.save()
+          ctx.beginPath()
+          roundRect(ctx, x, y, seatW, seatH, 2)
+          ctx.clip()
+          ctx.strokeStyle = 'rgba(242,235,224,0.35)'
+          ctx.lineWidth = 1
+          for (let s = -seatH; s < seatW + seatH; s += 3) {
+            ctx.beginPath()
+            ctx.moveTo(x + s, y)
+            ctx.lineTo(x + s + seatH, y + seatH)
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
+
+        if (idx >= 0) lastHits.push({ idx, x, y, w: seatW, h: seatH })
       }
     }
 
@@ -77,6 +117,24 @@ export function drawSeatMap(
   })
 }
 
+/** Hit-test canvas-local coordinates (CSS → canvas pixel space handled by caller). */
+export function hitTestSeatMap(
+  canvasX: number,
+  canvasY: number,
+): number {
+  for (const h of lastHits) {
+    if (
+      canvasX >= h.x &&
+      canvasX <= h.x + h.w &&
+      canvasY >= h.y &&
+      canvasY <= h.y + h.h
+    ) {
+      return h.idx
+    }
+  }
+  return -1
+}
+
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   camX: number,
@@ -93,7 +151,6 @@ export function drawMinimap(
   const cx = W / 2
   const cy = H / 2 + 8
 
-  // Hall outline
   ctx.strokeStyle = 'rgba(232,168,56,0.35)'
   ctx.lineWidth = 1.5
   ctx.strokeRect(
@@ -103,7 +160,6 @@ export function drawMinimap(
     HALL.depth * sc,
   )
 
-  // Screen
   ctx.fillStyle = '#f2ebe0'
   ctx.fillRect(
     cx - (HALL.screenW / 2) * sc,
@@ -112,7 +168,6 @@ export function drawMinimap(
     5,
   )
 
-  // Camera
   ctx.fillStyle = '#e8a838'
   ctx.beginPath()
   ctx.arc(cx + camX * sc, cy + camZ * sc, 4, 0, Math.PI * 2)

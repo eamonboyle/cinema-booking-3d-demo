@@ -1,11 +1,18 @@
 import {
   BoxGeometry,
+  CanvasTexture,
   Color,
   InstancedMesh,
   MathUtils,
+  Mesh,
+  MeshBasicMaterial,
   MeshPhongMaterial,
   Object3D,
+  PlaneGeometry,
   SphereGeometry,
+  Sprite,
+  SpriteMaterial,
+  SRGBColorSpace,
   Vector3,
   type Scene,
 } from 'three'
@@ -55,6 +62,11 @@ export type SeatSystem = {
   tintRange: (start: number, count: number, mul: number) => void
   featuredIdx: number
   flushColors: () => void
+  bestAvailable: () => number
+  findByRowSeat: (rowLetter: string, seat: number) => number
+  setConfirmedGlow: (indices: number[]) => void
+  clearConfirmedGlow: () => void
+  setLabelsVisible: (visible: boolean) => void
 }
 
 function seatGeometry() {
@@ -72,20 +84,46 @@ function seatGeometry() {
   return mergeBoxes([pan, back, armsL, armsR, ped])
 }
 
+function makeLabelSprite(text: string, color = '#f2ebe0'): Sprite {
+  const cv = document.createElement('canvas')
+  cv.width = 128
+  cv.height = 64
+  const x = cv.getContext('2d')!
+  x.clearRect(0, 0, 128, 64)
+  x.fillStyle = 'rgba(12,10,11,0.55)'
+  x.beginPath()
+  x.moveTo(16, 12)
+  x.arcTo(120, 12, 120, 52, 8)
+  x.arcTo(120, 52, 8, 52, 8)
+  x.arcTo(8, 52, 8, 12, 8)
+  x.arcTo(8, 12, 120, 12, 8)
+  x.closePath()
+  x.fill()
+  x.fillStyle = color
+  x.font = '700 28px Manrope, sans-serif'
+  x.textAlign = 'center'
+  x.textBaseline = 'middle'
+  x.fillText(text, 64, 34)
+  const tex = new CanvasTexture(cv)
+  tex.colorSpace = SRGBColorSpace
+  const mat = new SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+  const spr = new Sprite(mat)
+  spr.scale.set(1.4, 0.7, 1)
+  return spr
+}
+
 export function buildSeats(
   scene: Scene,
   renderer: WebGLRenderer,
   camera: PerspectiveCamera,
   rng: () => number,
 ): SeatSystem {
-  // Count seats
   let count = 0
   const rowLayouts: { n: number; z: number; y: number; left: number; right: number }[] = []
   for (let r = 0; r < TOTAL_ROWS; r++) {
     const n = seatsInRow(r)
     const z = HALL.firstRowZ + r * HALL.rowSpacing
     const y = HALL.seatY0 + r * HALL.rake
-    // Split around centre aisle
     const half = Math.floor(n / 2)
     rowLayouts.push({ n, z, y, left: half, right: n - half })
     count += n
@@ -95,6 +133,8 @@ export function buildSeats(
   const mat = new MeshPhongMaterial({ shininess: 28, specular: 0x2a1a1c })
   const seatMesh = new InstancedMesh(geo, mat, count)
   seatMesh.frustumCulled = false
+  seatMesh.castShadow = true
+  seatMesh.receiveShadow = true
 
   const pickGeo = new BoxGeometry(0.58, 1.15, 0.55)
   pickGeo.translate(0, 0.58, 0)
@@ -116,30 +156,23 @@ export function buildSeats(
   const jitter = new Color()
   let idx = 0
   let featuredIdx = -1
+  const labels: Array<Sprite | Mesh> = []
 
   for (let r = 0; r < TOTAL_ROWS; r++) {
     const layout = rowLayouts[r]!
     const zone = zoneForRow(r)
     const zoneIdx = zoneList.indexOf(zone.id)
     const rowStart = idx
-    const totalW =
-      (layout.left - 1) * HALL.seatSpacing +
-      HALL.aisleHalf * 2 +
-      (layout.right - 1) * HALL.seatSpacing +
-      HALL.seatSpacing
 
-    // Left bank (negative X)
     for (let q = 0; q < layout.left; q++) {
       const x =
         -HALL.aisleHalf -
         HALL.seatSpacing / 2 -
         (layout.left - 1 - q) * HALL.seatSpacing
       placeSeat(idx, x, layout.y, layout.z, r, q + 1, zone, zoneIdx, rowStart, layout.n, rng)
-      // Featured: mid zone centre-ish
       if (zone.id === 'mid' && r === 6 && q === layout.left - 1) featuredIdx = idx
       idx++
     }
-    // Right bank
     for (let q = 0; q < layout.right; q++) {
       const x = HALL.aisleHalf + HALL.seatSpacing / 2 + q * HALL.seatSpacing
       placeSeat(
@@ -158,7 +191,21 @@ export function buildSeats(
       if (featuredIdx < 0 && zone.id === 'mid' && r === 6 && q === 0) featuredIdx = idx
       idx++
     }
-    void totalW
+
+    // Floating row letter at aisle edge
+    const letter = ROW_LETTERS[r] ?? '?'
+    const sprL = makeLabelSprite(letter)
+    sprL.position.set(
+      -HALL.aisleHalf - 0.55,
+      layout.y + 1.35,
+      layout.z,
+    )
+    scene.add(sprL)
+    labels.push(sprL)
+    const sprR = makeLabelSprite(letter)
+    sprR.position.set(HALL.aisleHalf + 0.55, layout.y + 1.35, layout.z)
+    scene.add(sprR)
+    labels.push(sprR)
   }
 
   function placeSeat(
@@ -175,7 +222,6 @@ export function buildSeats(
     rngFn: () => number,
   ) {
     dummy.position.set(x, y, z)
-    // Face the screen (−Z); backrest toward the rear of the house
     dummy.rotation.set(0, Math.PI, 0)
     dummy.updateMatrix()
     seatMesh.setMatrixAt(i, dummy.matrix)
@@ -213,6 +259,37 @@ export function buildSeats(
   if (seatMesh.instanceColor) seatMesh.instanceColor.needsUpdate = true
   scene.add(seatMesh)
 
+  // Zone name markers along side wall
+  ;(['front', 'mid', 'rear'] as const).forEach((id) => {
+    const z = zoneForRow(
+      id === 'front' ? 1 : id === 'mid' ? 6 : 11,
+    )
+    const midRow = z.rowStart + Math.floor(z.rowCount / 2)
+    const y = HALL.seatY0 + midRow * HALL.rake + 2.2
+    const zz = HALL.firstRowZ + midRow * HALL.rowSpacing
+    const plane = document.createElement('canvas')
+    plane.width = 256
+    plane.height = 64
+    const px = plane.getContext('2d')!
+    px.fillStyle = 'rgba(12,10,11,0.5)'
+    px.fillRect(0, 0, 256, 64)
+    px.fillStyle = '#e8a838'
+    px.font = '700 26px Oswald, sans-serif'
+    px.textAlign = 'center'
+    px.textBaseline = 'middle'
+    px.fillText(z.name.toUpperCase(), 128, 34)
+    const tex = new CanvasTexture(plane)
+    tex.colorSpace = SRGBColorSpace
+    const m = new Mesh(
+      new PlaneGeometry(3.2, 0.8),
+      new MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }),
+    )
+    m.position.set(-HALL.width / 2 + 0.25, y, zz)
+    m.rotation.y = Math.PI / 2
+    scene.add(m)
+    labels.push(m)
+  })
+
   // Occupied patrons
   {
     const occ: number[] = []
@@ -232,6 +309,7 @@ export function buildSeats(
     const heads = new InstancedMesh(headGeo, headMat, occ.length)
     torsos.frustumCulled = false
     heads.frustumCulled = false
+    torsos.castShadow = true
     const cloth = [0x1a1a22, 0xe8e0d4, 0x2a4a6e, 0x4a2a1a, 0x1a3a2a, 0x3a1a3a]
     const skins = [0x8d5a3b, 0xc98d63, 0xeac1a4, 0x6b4226, 0xa5714b]
     const dm = new Object3D()
@@ -259,12 +337,12 @@ export function buildSeats(
   if (featuredIdx < 0) featuredIdx = Math.floor(count / 2)
 
   const tmpC = new Color()
+  let glowIndices: number[] = []
 
   function seatScore(i: number): number {
     const z = meta.pos[i * 3 + 2]!
     const x = meta.pos[i * 3]!
     const dist = Math.abs(z - HALL.screenZ)
-    // Sweet spot ~ mid rows, near centre
     const distPenalty = MathUtils.clamp(Math.abs(dist - 14) / 12, 0, 1) * 22
     const sidePenalty = (Math.abs(x) / (HALL.width / 2)) * 14
     const rakeBonus = MathUtils.clamp((meta.pos[i * 3 + 1]! - 0.5) / 3, 0, 1) * 6
@@ -328,6 +406,50 @@ export function buildSeats(
     if (seatMesh.instanceColor) seatMesh.instanceColor.needsUpdate = true
   }
 
+  function bestAvailable(): number {
+    let best = featuredIdx
+    let bestScore = -1
+    for (let i = 0; i < count; i++) {
+      if (!meta.avail[i]) continue
+      const s = seatScore(i)
+      if (s > bestScore) {
+        bestScore = s
+        best = i
+      }
+    }
+    return best
+  }
+
+  function findByRowSeat(rowLetter: string, seat: number): number {
+    const letter = rowLetter.trim().toUpperCase()
+    const row = ROW_LETTERS.indexOf(letter)
+    if (row < 0) return -1
+    for (let i = 0; i < count; i++) {
+      if (meta.row[i] === row && meta.seatNum[i] === seat) return i
+    }
+    return -1
+  }
+
+  function setConfirmedGlow(indices: number[]) {
+    clearConfirmedGlow()
+    glowIndices = [...indices]
+    const glow = new Color(0x3d9b6a)
+    for (const i of glowIndices) {
+      seatMesh.setColorAt(i, glow)
+    }
+    flushColors()
+  }
+
+  function clearConfirmedGlow() {
+    for (const i of glowIndices) restoreSeat(i)
+    glowIndices = []
+    flushColors()
+  }
+
+  function setLabelsVisible(visible: boolean) {
+    for (const label of labels) label.visible = visible
+  }
+
   return {
     seatMesh,
     picker,
@@ -342,5 +464,10 @@ export function buildSeats(
     tintRange,
     featuredIdx,
     flushColors,
+    bestAvailable,
+    findByRowSeat,
+    setConfirmedGlow,
+    clearConfirmedGlow,
+    setLabelsVisible,
   }
 }

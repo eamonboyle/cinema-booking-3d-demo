@@ -1,8 +1,11 @@
-/** Soft theatre ambience — synthesised, no assets (stadium crowd pattern). */
+/** Soft theatre ambience + projector hum — synthesised, no assets. */
 export class TheatreAudio {
   private ctx: AudioContext | null = null
   private gain: GainNode | null = null
+  private humGain: GainNode | null = null
   muted = false
+  private ambientLevel = 0.015
+  private humLevel = 0
 
   ensure(): void {
     if (this.ctx) return
@@ -39,19 +42,59 @@ export class TheatreAudio {
     bp.connect(this.gain)
     this.gain.connect(this.ctx.destination)
     src.start()
+
+    // Soft projector / screen hum
+    const osc = this.ctx.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.value = 92
+    const osc2 = this.ctx.createOscillator()
+    osc2.type = 'triangle'
+    osc2.frequency.value = 184
+    this.humGain = this.ctx.createGain()
+    this.humGain.gain.value = 0
+    const humFilter = this.ctx.createBiquadFilter()
+    humFilter.type = 'lowpass'
+    humFilter.frequency.value = 280
+    osc.connect(humFilter)
+    osc2.connect(humFilter)
+    humFilter.connect(this.humGain)
+    this.humGain.connect(this.ctx.destination)
+    osc.start()
+    osc2.start()
   }
 
   setLevel(level: number): void {
-    if (!this.ctx || !this.gain) return
-    this.gain.gain.cancelScheduledValues(this.ctx.currentTime)
-    this.gain.gain.linearRampToValueAtTime(
-      this.muted ? 0.0001 : level,
-      this.ctx.currentTime + 1.2,
-    )
+    this.ambientLevel = level
+    this.applyGains()
+  }
+
+  setHum(level: number): void {
+    this.humLevel = level
+    this.applyGains()
+  }
+
+  private applyGains(): void {
+    if (!this.ctx) return
+    const t = this.ctx.currentTime + 1.0
+    if (this.gain) {
+      this.gain.gain.cancelScheduledValues(this.ctx.currentTime)
+      this.gain.gain.linearRampToValueAtTime(
+        this.muted ? 0.0001 : this.ambientLevel,
+        t,
+      )
+    }
+    if (this.humGain) {
+      this.humGain.gain.cancelScheduledValues(this.ctx.currentTime)
+      this.humGain.gain.linearRampToValueAtTime(
+        this.muted ? 0.0001 : this.humLevel,
+        t,
+      )
+    }
   }
 
   toggleMute(): boolean {
     this.muted = !this.muted
+    this.applyGains()
     return this.muted
   }
 }

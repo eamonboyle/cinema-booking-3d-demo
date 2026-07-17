@@ -15,8 +15,17 @@ import {
 import { canvasTexture } from '../shared/textures'
 import { HALL } from './layout'
 
-export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
+export type AuditoriumHandle = {
+  root: Group
+  setHouseLevel: (level: number) => void
+  screenWash: SpotLight
+  screenBounce: SpotLight
+  beam: Mesh
+}
+
+export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): AuditoriumHandle {
   const root = new Group()
+  const houseLights: { intensity: number; light: PointLight | DirectionalLight }[] = []
 
   // Floor carpet — warm burgundy, readable under house lights
   const carpetTex = canvasTexture(renderer, 256, 256, (x, w, h) => {
@@ -47,6 +56,7 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
   const wallMat = new MeshLambertMaterial({ color: 0x4a3038 })
   const wallL = new Mesh(new BoxGeometry(0.4, HALL.height, HALL.depth + 2), wallMat)
   wallL.position.set(-HALL.width / 2 - 0.2, HALL.height / 2, 1)
+  wallL.receiveShadow = true
   const wallR = wallL.clone()
   wallR.position.x = HALL.width / 2 + 0.2
   root.add(wallL, wallR)
@@ -93,6 +103,7 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
   )
   aisle.rotation.x = -Math.PI / 2
   aisle.position.set(0, 0.02, 2)
+  aisle.receiveShadow = true
   root.add(aisle)
 
   // Exit signs
@@ -109,10 +120,22 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
   // House fill over seating
   const houseFill = new DirectionalLight(0xfff2e4, 1.35)
   houseFill.position.set(4, 14, 8)
+  houseFill.castShadow = true
+  houseFill.shadow.mapSize.set(1024, 1024)
+  houseFill.shadow.camera.near = 2
+  houseFill.shadow.camera.far = 40
+  houseFill.shadow.camera.left = -14
+  houseFill.shadow.camera.right = 14
+  houseFill.shadow.camera.top = 18
+  houseFill.shadow.camera.bottom = -10
+  houseFill.shadow.bias = -0.0008
   root.add(houseFill)
+  houseLights.push({ light: houseFill, intensity: 1.35 })
+
   const houseFill2 = new DirectionalLight(0xffe0c8, 0.7)
   houseFill2.position.set(-6, 10, -2)
   root.add(houseFill2)
+  houseLights.push({ light: houseFill2, intensity: 0.7 })
 
   // Ceiling house lights
   for (let i = 0; i < 4; i++) {
@@ -120,6 +143,7 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
     const pl = new PointLight(0xfff0e0, 2.2, 16, 1.4)
     pl.position.set(0, HALL.height - 1.2, z)
     root.add(pl)
+    houseLights.push({ light: pl, intensity: 2.2 })
   }
 
   // Wall sconces
@@ -133,6 +157,7 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
       const pl = new PointLight(0xffc878, 1.8, 14, 1.5)
       pl.position.copy(bulb.position)
       root.add(pl)
+      houseLights.push({ light: pl, intensity: 1.8 })
     })
   }
 
@@ -169,5 +194,19 @@ export function buildAuditorium(scene: Scene, renderer: WebGLRenderer): Group {
   root.add(beam)
 
   scene.add(root)
-  return root
+
+  return {
+    root,
+    screenWash: wash,
+    screenBounce,
+    beam,
+    setHouseLevel(level: number) {
+      const t = Math.max(0, Math.min(1, level))
+      for (const { light, intensity } of houseLights) {
+        light.intensity = intensity * t
+      }
+      // Dim sconce bulbs visually
+      sconceMat.color.setHex(t < 0.35 ? 0x6a4820 : 0xffc858)
+    },
+  }
 }
