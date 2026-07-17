@@ -103,23 +103,23 @@ export function mountOverlay(root: HTMLElement): UiRefs {
 
       <section id="seatcard" class="panel" aria-label="Selected seat" aria-live="polite">
         <header>
-          <div class="label"><span id="p-label">SUGGESTED SEAT</span></div>
+          <div class="label"><span id="p-label">PICK A SEAT</span></div>
         </header>
-        <div id="p-zone">Centre House</div>
+        <div id="p-zone">Click any seat in 3D or on the map</div>
         <div class="seat-grid">
-          <div class="cell"><div class="k">Row</div><div class="v" id="p-row">G</div></div>
-          <div class="cell"><div class="k">Seat</div><div class="v" id="p-seat">9</div></div>
-          <div class="cell"><div class="k">Price</div><div class="v" id="p-price">€18 <span class="unit">/seat</span></div></div>
+          <div class="cell"><div class="k">Row</div><div class="v" id="p-row">—</div></div>
+          <div class="cell"><div class="k">Seat</div><div class="v" id="p-seat">—</div></div>
+          <div class="cell"><div class="k">Price</div><div class="v" id="p-price">€— <span class="unit">/seat</span></div></div>
         </div>
         <div class="preview">
           <img id="p-img" alt="View of the screen from the selected seat" />
-          <div class="ph" id="p-ph">Rendering screen view…</div>
+          <div class="ph" id="p-ph">Select a seat to preview the view</div>
           <div class="pill" id="p-score">★ — screen</div>
         </div>
         <div class="benefits" id="benefits">
-          <div class="benefit"><span class="btxt">Sweet-spot rake</span></div>
-          <div class="benefit"><span class="btxt">Padded recliner</span></div>
-          <div class="benefit"><span class="btxt">Popcorn upgrade</span></div>
+          <div class="benefit"><span class="btxt">—</span></div>
+          <div class="benefit"><span class="btxt">—</span></div>
+          <div class="benefit"><span class="btxt">—</span></div>
         </div>
         <button id="checkout" type="button">
           <span id="checkout-label">Reserve seat</span>
@@ -200,7 +200,7 @@ export function mountOverlay(root: HTMLElement): UiRefs {
   }
 }
 
-export type PanelState = 'suggested' | 'previewing' | 'confirmed' | 'browsing'
+export type PanelState = 'empty' | 'suggested' | 'previewing' | 'confirmed' | 'browsing'
 
 export function updateSeatPanel(
   ui: UiRefs,
@@ -210,10 +210,32 @@ export function updateSeatPanel(
     seat: number
     price: number
     score: number
-  },
+  } | null,
   state: PanelState,
   group?: { count: number; total: number },
 ): void {
+  if (!info || state === 'empty') {
+    ui.pLabel.textContent = 'PICK A SEAT'
+    ui.pZone.textContent = 'Click any seat in 3D or on the map'
+    ui.pRow.textContent = '—'
+    ui.pSeat.textContent = '—'
+    ui.pPrice.innerHTML = '€— <span class="unit">/seat</span>'
+    ui.pScore.textContent = '★ — screen'
+    ui.benefits.forEach((el) => {
+      el.textContent = '—'
+    })
+    ui.pImg.classList.remove('ready')
+    ui.pImg.removeAttribute('src')
+    ui.pPh.style.display = 'grid'
+    ui.pPh.textContent = 'Select a seat to preview the view'
+    ui.checkout.classList.remove('done')
+    ui.ckLabel.textContent = 'Reserve seat'
+    ui.seatcard.classList.remove('refresh')
+    void ui.seatcard.offsetWidth
+    ui.seatcard.classList.add('refresh')
+    return
+  }
+
   const multi = group && group.count > 1
   ui.pLabel.textContent =
     state === 'confirmed'

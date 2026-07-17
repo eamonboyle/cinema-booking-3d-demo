@@ -528,15 +528,12 @@ export function startApp(root: HTMLElement): void {
     history.replaceState(null, '', url)
   }
 
-  function parseDeepLink(): number {
-    const params = new URLSearchParams(location.search)
-    const row = params.get('row')
-    const seat = Number(params.get('seat'))
-    if (row && Number.isFinite(seat)) {
-      const idx = seats.findByRowSeat(row, seat)
-      if (idx >= 0 && seats.meta.avail[idx]) return idx
-    }
-    return -1
+  function clearDeepLink() {
+    const url = new URL(location.href)
+    if (!url.searchParams.has('row') && !url.searchParams.has('seat')) return
+    url.searchParams.delete('row')
+    url.searchParams.delete('seat')
+    history.replaceState(null, '', url)
   }
 
   function findNearestAvailable(idx: number): number {
@@ -876,17 +873,14 @@ export function startApp(root: HTMLElement): void {
     if (!document.hidden) invalidate()
   })
 
-  // Boot: deep link or featured — panel syncs after intro
-  const deepIdx = parseDeepLink()
-  const bootIdx = deepIdx >= 0 ? deepIdx : seats.featuredIdx
-  selectedIdx = bootIdx
+  // Boot with no seat until the user picks one
+  clearDeepLink()
+  selectedIdx = -1
   selectedGroup.clear()
-  selectedGroup.add(bootIdx)
-  currentInfo = seats.seatInfo(bootIdx)
+  currentInfo = null
   paintSelectionColors()
   refreshMap()
   syncFavButton()
-  writeDeepLink(currentInfo)
 
   applyOrbit(camera, orbit)
   hall.setHouseLevel(1)
@@ -926,15 +920,10 @@ export function startApp(root: HTMLElement): void {
     filmActive = false
     screen.setAnimating(false)
     panelRevealed = true
-    updateSeatPanel(ui, currentInfo!, 'suggested', groupStats())
-    captureView(bootIdx)
+    updateSeatPanel(ui, null, 'empty')
     invalidate()
     ui.orbitHint.classList.add('show')
     setTimeout(() => ui.orbitHint.classList.remove('show'), 5200)
-
-    if (deepIdx >= 0) {
-      setTimeout(() => flyToSeat(deepIdx), REDUCED ? 100 : 600)
-    }
   }
 
   void playIntro()
